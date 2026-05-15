@@ -6,6 +6,52 @@
   width: 100vw;
 }
 
+.app-shell.panels-hidden {
+  grid-template-columns: 1fr;
+}
+
+.app-shell.panels-hidden > .sidebar {
+  display: none;
+}
+
+.app-shell.panels-hidden .workspace {
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr;
+}
+
+.app-shell.panels-hidden .file-tree-panel {
+  display: none;
+}
+
+.panel-toggle-btn {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  z-index: 50;
+  width: 26px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #9a9aa3;
+  background: transparent;
+  -webkit-app-region: no-drag;
+}
+
+.panel-toggle-btn:hover {
+  background: #232328;
+  color: #ffffff;
+}
+
+.panel-toggle-btn[aria-pressed="true"] {
+  color: #c9c9d0;
+}
+
+.panel-toggle-btn[aria-pressed="true"] svg rect {
+  fill: rgba(154, 154, 163, 0.18);
+}
+
 .sidebar {
   grid-column: 1;
   grid-row: 1;

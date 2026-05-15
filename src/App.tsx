@@ -37,6 +37,7 @@ export const App: Component = () => {
   const [currentProject, setCurrentProject] = createSignal<Project | null>(null);
   const [recentsKey, setRecentsKey] = createSignal(0);
   const [bucketsKey, setBucketsKey] = createSignal(0);
+  const [panelsHidden, setPanelsHidden] = createSignal(false);
 
   const projectPath = () => currentProject()?.path ?? null;
   const projectId = () => currentProject()?.id ?? null;
@@ -157,7 +158,20 @@ export const App: Component = () => {
   const projectName = () => currentProject()?.name ?? null;
 
   return (
-    <div class="app-shell">
+    <div class="app-shell" classList={{ "panels-hidden": panelsHidden() }}>
+      <button
+        type="button"
+        class="panel-toggle-btn"
+        onClick={() => setPanelsHidden((v) => !v)}
+        title={panelsHidden() ? "Show panels" : "Hide panels"}
+        aria-label={panelsHidden() ? "Show panels" : "Hide panels"}
+        aria-pressed={panelsHidden()}
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25">
+          <rect x="2" y="2.5" width="12" height="11" rx="1.25" />
+          <line x1="6" y1="2.5" x2="6" y2="13.5" />
+        </svg>
+      </button>
       <aside class="sidebar">
         <div class="sidebar-section">
           <div class="sidebar-section-title">Project</div>
