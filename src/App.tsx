@@ -1,34 +1,69 @@
-import { Component, createSignal, onCleanup, onMount, Show } from "solid-js";
+import {
+  Component,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
+import { BucketBar } from "./components/BucketBar";
+import { BucketsList } from "./components/BucketsList";
 import { FileTree } from "./components/FileTree";
 import { QuickSwitcher } from "./components/QuickSwitcher";
 import { RecentProjects } from "./components/RecentProjects";
 import { TerminalsView } from "./components/TerminalsView";
 import {
   currentWindowLabel,
+  cycleBucket,
+  getActiveBucket,
   getProjectById,
   lastProject,
+  listBuckets,
   markFocused,
+  onBucketsChanged,
+  onMenuEvent,
   openProject,
   pickFolder,
   requestOpenProject,
 } from "./lib/ipc";
+import type { Bucket, Project } from "./lib/types";
 
 export const App: Component = () => {
   const [windowLabel, setWindowLabel] = createSignal<string>("main");
-  const [projectPath, setProjectPath] = createSignal<string | null>(null);
+  const [currentProject, setCurrentProject] = createSignal<Project | null>(null);
   const [recentsKey, setRecentsKey] = createSignal(0);
+  const [bucketsKey, setBucketsKey] = createSignal(0);
 
+  const projectPath = () => currentProject()?.path ?? null;
+  const projectId = () => currentProject()?.id ?? null;
   const isMain = () => windowLabel() === "main";
 
-  // Mutates the CURRENT window's project. Only available in the main window —
-  // project-N windows are pinned to their project (ADR-0006).
+  // Buckets and active bucket id — re-fetch whenever bucketsKey bumps (which
+  // happens on every Rust-side bucket mutation, broadcast app-wide).
+  const [buckets] = createResource<Bucket[], number>(
+    () => bucketsKey(),
+    (_key) => listBuckets(),
+  );
+  const [activeBucketId] = createResource<number | null, number>(
+    () => bucketsKey(),
+    (_key) => getActiveBucket(),
+  );
+
+  const activeBucket = createMemo<Bucket | null>(() => {
+    const id = activeBucketId();
+    if (id == null) return null;
+    const list = buckets() ?? [];
+    return list.find((b) => b.id === id) ?? null;
+  });
+
   const mutateCurrentProject = async (path: string) => {
     try {
-      await openProject(path);
-      setProjectPath(path);
+      const proj = await openProject(path);
+      setCurrentProject(proj);
       setRecentsKey((v) => v + 1);
     } catch (err) {
       console.error("openProject failed:", err);
@@ -44,7 +79,6 @@ export const App: Component = () => {
     }
   };
 
-  // Opens a project in its dedicated window. Focuses if already open.
   const navigateToProject = async (path: string) => {
     try {
       await requestOpenProject(path);
@@ -53,6 +87,11 @@ export const App: Component = () => {
       console.error("requestOpenProject failed:", err);
     }
   };
+
+  let unlistenFocus: UnlistenFn | undefined;
+  let unlistenBuckets: UnlistenFn | undefined;
+  let unlistenBucketNext: UnlistenFn | undefined;
+  let unlistenBucketPrev: UnlistenFn | undefined;
 
   onMount(async () => {
     let label = "main";
@@ -67,7 +106,7 @@ export const App: Component = () => {
       try {
         const last = await lastProject();
         if (last) {
-          setProjectPath(last.path);
+          setCurrentProject(last);
           setRecentsKey((v) => v + 1);
         }
       } catch (err) {
@@ -79,7 +118,7 @@ export const App: Component = () => {
         try {
           const proj = await getProjectById(id);
           if (proj) {
-            setProjectPath(proj.path);
+            setCurrentProject(proj);
             setRecentsKey((v) => v + 1);
           }
         } catch (err) {
@@ -88,24 +127,34 @@ export const App: Component = () => {
       }
     }
 
-    // Bump last_focused_at whenever this window gains focus.
     unlistenFocus = await getCurrentWindow().onFocusChanged((event) => {
       if (!event.payload) return;
       const p = projectPath();
       if (p) markFocused(p).catch(() => {});
       setRecentsKey((v) => v + 1);
+      setBucketsKey((v) => v + 1);
+    });
+
+    unlistenBuckets = await onBucketsChanged(() => {
+      setBucketsKey((v) => v + 1);
+    });
+
+    unlistenBucketNext = await onMenuEvent("bucket-next", () => {
+      cycleBucket(1).catch((err) => console.warn("cycleBucket(1) failed:", err));
+    });
+    unlistenBucketPrev = await onMenuEvent("bucket-prev", () => {
+      cycleBucket(-1).catch((err) => console.warn("cycleBucket(-1) failed:", err));
     });
   });
 
-  let unlistenFocus: UnlistenFn | undefined;
-  onCleanup(() => unlistenFocus?.());
+  onCleanup(() => {
+    unlistenFocus?.();
+    unlistenBuckets?.();
+    unlistenBucketNext?.();
+    unlistenBucketPrev?.();
+  });
 
-  const projectName = () => {
-    const p = projectPath();
-    if (!p) return null;
-    const parts = p.split("/").filter(Boolean);
-    return parts[parts.length - 1] ?? p;
-  };
+  const projectName = () => currentProject()?.name ?? null;
 
   return (
     <div class="app-shell">
@@ -150,7 +199,11 @@ export const App: Component = () => {
 
         <div class="sidebar-section">
           <div class="sidebar-section-title">Buckets</div>
-          <div class="sidebar-placeholder">(M4 — the killer feature)</div>
+          <BucketsList
+            buckets={buckets() ?? []}
+            activeBucketId={activeBucketId() ?? null}
+            currentProjectId={projectId()}
+          />
         </div>
       </aside>
 
@@ -181,11 +234,10 @@ export const App: Component = () => {
         )}
       </Show>
 
-      <footer class="bucket-bar">
-        <span>
-          Lexical Emerson v0.1 — M3 {isMain() ? "(launcher)" : `(${windowLabel()})`}
-        </span>
-      </footer>
+      <BucketBar
+        activeBucket={activeBucket()}
+        trailing={isMain() ? "v0.1 launcher" : windowLabel()}
+      />
 
       <QuickSwitcher />
     </div>

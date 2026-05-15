@@ -22,3 +22,10 @@ export interface Project {
   last_focused_at: string | null;
   last_active_at: string | null;
 }
+
+export interface Bucket {
+  id: number;
+  name: string;
+  cursor: number;
+  projects: Project[];
+}

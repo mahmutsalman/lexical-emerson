@@ -42,6 +42,15 @@ fn main() {
             commands::get_project_by_id,
             commands::request_open_project,
             commands::current_window_label,
+            commands::list_buckets,
+            commands::create_bucket,
+            commands::delete_bucket,
+            commands::rename_bucket,
+            commands::add_to_bucket,
+            commands::remove_from_bucket,
+            commands::set_active_bucket,
+            commands::get_active_bucket,
+            commands::cycle_bucket,
         ])
         .setup(|app| {
             let app_data = app
@@ -70,6 +79,9 @@ fn main() {
                 "terminal_next" => "menu://terminal-next",
                 "terminal_prev" => "menu://terminal-prev",
                 "go_quick_switcher" => "menu://quick-switcher",
+                "bucket_next" => "menu://bucket-next",
+                "bucket_prev" => "menu://bucket-prev",
+                "bucket_new" => "menu://bucket-new",
                 _ => return,
             };
             // Route menu events to the focused window only — broadcasting
@@ -159,6 +171,22 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .item(&go_quick_switcher)
         .build()?;
 
+    let bucket_next = MenuItemBuilder::with_id("bucket_next", "Cycle Bucket Forward")
+        .accelerator("CmdOrCtrl+J")
+        .build(app)?;
+    let bucket_prev = MenuItemBuilder::with_id("bucket_prev", "Cycle Bucket Backward")
+        .accelerator("CmdOrCtrl+Shift+J")
+        .build(app)?;
+    let bucket_new = MenuItemBuilder::with_id("bucket_new", "New Bucket…")
+        .accelerator("CmdOrCtrl+Shift+B")
+        .build(app)?;
+    let bucket_submenu = SubmenuBuilder::new(app, "Bucket")
+        .item(&bucket_next)
+        .item(&bucket_prev)
+        .separator()
+        .item(&bucket_new)
+        .build()?;
+
     let window_submenu = SubmenuBuilder::new(app, "Window")
         .minimize()
         .build()?;
@@ -171,6 +199,7 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
             &view_submenu,
             &go_submenu,
             &terminal_submenu,
+            &bucket_submenu,
             &window_submenu,
         ])
         .build()?;

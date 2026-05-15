@@ -1,10 +1,12 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
+};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::projects::folder_basename;
-use crate::store::Project;
+use crate::store::{Bucket, Project};
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -158,8 +160,25 @@ pub fn mark_focused(state: State<AppState>, path: String) -> Result<(), String> 
     state.store.mark_focused(&path).map_err(|e| e.to_string())
 }
 
-// Spawn a dedicated window for the given project path, or focus the existing
-// one if it's already open. See ADR-0006.
+// Spawn a dedicated window for the given project, or focus the existing one
+// if it's already open. See ADR-0006.
+fn spawn_or_focus_project_window(app: &AppHandle, project: &Project) -> Result<(), String> {
+    let label = format!("project-{}", project.id);
+    if let Some(existing) = app.get_webview_window(&label) {
+        existing.show().map_err(|e| e.to_string())?;
+        existing.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let title = format!("Lexical Emerson — {}", project.name);
+    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
+        .title(title)
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(700.0, 480.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn request_open_project(
     app: AppHandle,
@@ -171,21 +190,120 @@ pub fn request_open_project(
         .store
         .register_or_focus(&path, &name)
         .map_err(|e| e.to_string())?;
-    let label = format!("project-{}", project.id);
+    spawn_or_focus_project_window(&app, &project)?;
+    Ok(project)
+}
 
-    if let Some(existing) = app.get_webview_window(&label) {
-        existing.show().map_err(|e| e.to_string())?;
-        existing.set_focus().map_err(|e| e.to_string())?;
-        return Ok(project);
-    }
+// --- buckets ---------------------------------------------------------------
 
-    let title = format!("Lexical Emerson — {}", project.name);
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
-        .title(title)
-        .inner_size(1200.0, 800.0)
-        .min_inner_size(700.0, 480.0)
-        .build()
+// Notify every window that bucket data changed so each can refresh its UI.
+fn emit_buckets_changed(app: &AppHandle) {
+    let _ = app.emit("buckets://changed", ());
+}
+
+#[tauri::command]
+pub fn list_buckets(state: State<AppState>) -> Result<Vec<Bucket>, String> {
+    state.store.list_buckets().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_bucket(
+    app: AppHandle,
+    state: State<AppState>,
+    name: String,
+) -> Result<Bucket, String> {
+    let bucket = state.store.create_bucket(&name).map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(bucket)
+}
+
+#[tauri::command]
+pub fn delete_bucket(
+    app: AppHandle,
+    state: State<AppState>,
+    id: i64,
+) -> Result<(), String> {
+    state.store.delete_bucket(id).map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rename_bucket(
+    app: AppHandle,
+    state: State<AppState>,
+    id: i64,
+    name: String,
+) -> Result<(), String> {
+    state.store.rename_bucket(id, &name).map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn add_to_bucket(
+    app: AppHandle,
+    state: State<AppState>,
+    bucket_id: i64,
+    project_id: i64,
+) -> Result<(), String> {
+    state
+        .store
+        .add_to_bucket(bucket_id, project_id)
         .map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_from_bucket(
+    app: AppHandle,
+    state: State<AppState>,
+    bucket_id: i64,
+    project_id: i64,
+) -> Result<(), String> {
+    state
+        .store
+        .remove_from_bucket(bucket_id, project_id)
+        .map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_active_bucket(
+    app: AppHandle,
+    state: State<AppState>,
+    id: Option<i64>,
+) -> Result<(), String> {
+    state.store.set_active_bucket(id).map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_active_bucket(state: State<AppState>) -> Result<Option<i64>, String> {
+    state.store.get_active_bucket().map_err(|e| e.to_string())
+}
+
+// Cycle the active bucket: advance its cursor, focus or spawn the resulting
+// project's window. Returns the project that was activated, or None if there
+// is no active bucket / the bucket is empty.
+#[tauri::command]
+pub fn cycle_bucket(
+    app: AppHandle,
+    state: State<AppState>,
+    direction: i32,
+) -> Result<Option<Project>, String> {
+    let project = state
+        .store
+        .cycle_active_bucket(direction)
+        .map_err(|e| e.to_string())?;
+    if let Some(ref p) = project {
+        spawn_or_focus_project_window(&app, p)?;
+    }
+    // Cursor changed; let every window refresh its BucketBar.
+    emit_buckets_changed(&app);
     Ok(project)
 }
 

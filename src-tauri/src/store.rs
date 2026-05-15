@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-const SCHEMA_V1: &str = "
+const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS projects (
     id              INTEGER PRIMARY KEY,
     path            TEXT NOT NULL UNIQUE,
@@ -15,6 +15,27 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE INDEX IF NOT EXISTS idx_projects_recent
     ON projects(last_active_at DESC, last_focused_at DESC);
+
+CREATE TABLE IF NOT EXISTS buckets (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    cursor     INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS bucket_projects (
+    bucket_id  INTEGER NOT NULL REFERENCES buckets(id) ON DELETE CASCADE,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    position   INTEGER NOT NULL,
+    PRIMARY KEY (bucket_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bucket_projects_order
+    ON bucket_projects(bucket_id, position);
+
+CREATE TABLE IF NOT EXISTS app_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 ";
 
 #[derive(Serialize, Clone)]
@@ -38,7 +59,8 @@ impl Store {
         let conn = Connection::open(db_path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        conn.execute_batch(SCHEMA_V1)?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.execute_batch(SCHEMA)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -116,6 +138,186 @@ impl Store {
         )?;
         Ok(())
     }
+
+    // --- buckets -----------------------------------------------------------
+
+    pub fn list_buckets(&self) -> Result<Vec<Bucket>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, cursor FROM buckets ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (id, name, cursor) = r?;
+            let projects = load_bucket_projects(&conn, id)?;
+            out.push(Bucket { id, name, cursor, projects });
+        }
+        Ok(out)
+    }
+
+    pub fn create_bucket(&self, name: &str) -> Result<Bucket> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute("INSERT INTO buckets (name) VALUES (?1)", params![name])?;
+        let id = conn.last_insert_rowid();
+        Ok(Bucket {
+            id,
+            name: name.to_string(),
+            cursor: 0,
+            projects: Vec::new(),
+        })
+    }
+
+    pub fn delete_bucket(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute("DELETE FROM buckets WHERE id = ?1", params![id])?;
+        // Also clear active_bucket_id if it matched.
+        conn.execute(
+            "DELETE FROM app_meta WHERE key = 'active_bucket_id' AND value = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn rename_bucket(&self, id: i64, name: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE buckets SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn add_to_bucket(&self, bucket_id: i64, project_id: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        // Already in bucket? No-op.
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM bucket_projects WHERE bucket_id = ?1 AND project_id = ?2",
+            params![bucket_id, project_id],
+            |row| row.get(0),
+        )?;
+        if exists > 0 {
+            return Ok(());
+        }
+        let next_pos: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM bucket_projects WHERE bucket_id = ?1",
+            params![bucket_id],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "INSERT INTO bucket_projects (bucket_id, project_id, position)
+                  VALUES (?1, ?2, ?3)",
+            params![bucket_id, project_id, next_pos],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_from_bucket(&self, bucket_id: i64, project_id: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "DELETE FROM bucket_projects
+              WHERE bucket_id = ?1 AND project_id = ?2",
+            params![bucket_id, project_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_active_bucket(&self, id: Option<i64>) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        match id {
+            Some(id) => {
+                conn.execute(
+                    "INSERT INTO app_meta (key, value) VALUES ('active_bucket_id', ?1)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![id.to_string()],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "DELETE FROM app_meta WHERE key = 'active_bucket_id'",
+                    [],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_active_bucket(&self) -> Result<Option<i64>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        match conn.query_row(
+            "SELECT value FROM app_meta WHERE key = 'active_bucket_id'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(s) => Ok(s.parse::<i64>().ok()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // Advance the active bucket's cursor by `direction` (+1 or -1), persist the
+    // new cursor, and return the (project_id, project_path, project_name) at
+    // that position. Returns None if there's no active bucket or it's empty.
+    pub fn cycle_active_bucket(&self, direction: i32) -> Result<Option<Project>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let active_id: Option<i64> = match conn.query_row(
+            "SELECT value FROM app_meta WHERE key = 'active_bucket_id'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(s) => s.parse::<i64>().ok(),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(e) => return Err(e.into()),
+        };
+        let Some(bucket_id) = active_id else {
+            return Ok(None);
+        };
+        let projects = load_bucket_projects(&conn, bucket_id)?;
+        if projects.is_empty() {
+            return Ok(None);
+        }
+        let cursor: i64 = conn.query_row(
+            "SELECT cursor FROM buckets WHERE id = ?1",
+            params![bucket_id],
+            |row| row.get(0),
+        )?;
+        let len = projects.len() as i64;
+        let next = ((cursor + direction as i64) % len + len) % len;
+        conn.execute(
+            "UPDATE buckets SET cursor = ?1 WHERE id = ?2",
+            params![next, bucket_id],
+        )?;
+        Ok(Some(projects[next as usize].clone()))
+    }
+}
+
+#[derive(Serialize, Clone)]
+pub struct Bucket {
+    pub id: i64,
+    pub name: String,
+    pub cursor: i64,
+    pub projects: Vec<Project>,
+}
+
+fn load_bucket_projects(
+    conn: &Connection,
+    bucket_id: i64,
+) -> Result<Vec<Project>> {
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.path, p.name, p.last_focused_at, p.last_active_at
+           FROM bucket_projects bp
+           JOIN projects p ON p.id = bp.project_id
+          WHERE bp.bucket_id = ?1
+          ORDER BY bp.position ASC",
+    )?;
+    let rows = stmt.query_map(params![bucket_id], project_from_row)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
 }
 
 fn select_by_path(conn: &Connection, path: &str) -> Result<Project> {

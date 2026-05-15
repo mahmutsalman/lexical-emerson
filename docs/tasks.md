@@ -1,38 +1,39 @@
-# Tasks — Current Slice (M3)
+# Tasks — Current Slice (M4)
 
 > Regenerated each milestone from `plan.md` + recent ADRs. Do not edit by hand long-term — rewrite at slice boundaries.
 
-## Slice: M3 — Multi-window + Cmd+P switcher
+## Slice: M4 — Buckets (the killer feature)
 
 **Exit criteria** (all must hit):
 
-1. Cmd+P from any window opens a fuzzy modal listing all known projects.
-2. Pressing Enter on a project either focuses its existing window (if open) or spawns a new one.
-3. Clicking a project in the Recent sidebar opens it in a new window (not mutates current).
-4. "Switch folder…" button still mutates the current window's project (M2 semantics preserved).
-5. ⌘T / ⌘W / ⌘⇧]/[ menu shortcuts affect only the focused window's terminals, not all windows.
-6. Closing a project window kills its PTYs (verifiable via `ps`); other windows unaffected.
+1. Create a bucket from the sidebar's Buckets section via `+ New bucket`.
+2. Add 3 projects to the bucket — visible inline when the bucket is expanded.
+3. Click bucket name → that bucket is the active one (highlighted blue, shown in footer bar).
+4. `⌘⌥]` cycles forward: opens (or focuses) the next project's window. Wraps at the end.
+5. `⌘⌥[` cycles backward.
+6. The cursor position persists across app restart.
+7. Removing a project from a bucket while it's the active one doesn't crash; cycle continues with the smaller list.
+8. The active-bucket setting persists across app restart.
 
 ### Tasks
 
-- [x] Write `ADR-0006-window-project-identity.md`
-- [x] Update `plan.md` and `tasks.md`
-- [ ] Backend: `store::get_by_id`
-- [ ] Backend: commands `request_open_project`, `get_project_by_id`, `mark_focused`
-- [ ] Backend: add "Go" submenu with Quick Switcher (Cmd+P)
-- [ ] Backend: route `on_menu_event` only to focused window (M2 emitted to all)
-- [ ] Frontend: `ipc.ts` — wrappers for `requestOpenProject`, `getProjectById`, `markFocused`, `getCurrentWindowLabel`
-- [ ] Frontend: `App.tsx` branches on window label (main vs project-N)
-- [ ] Frontend: Recent click + new "Switch folder" semantics
-- [ ] Frontend: `QuickSwitcher.tsx` modal — fuzzy fzf-style scoring, keyboard nav
-- [ ] Frontend: window-focus listener calls `markFocused`
+- [x] Write `ADR-0007-bucket-model.md`
+- [x] Update `plan.md` + `tasks.md`
+- [ ] Backend: schema migrations (`buckets`, `bucket_projects`, `app_meta`)
+- [ ] Backend: `store.rs` bucket helpers (CRUD, cursor advance, active bucket get/set)
+- [ ] Backend: Tauri commands (`list_buckets`, `create_bucket`, `delete_bucket`, `rename_bucket`, `add_to_bucket`, `remove_from_bucket`, `set_active_bucket`, `get_active_bucket`, `cycle_bucket`)
+- [ ] Backend: new "Bucket" submenu in `main.rs` with Cycle Forward (⌘⌥]) + Cycle Backward (⌘⌥[) + separator + New Bucket (⌘⇧B)
+- [ ] Frontend: `ipc.ts` wrappers for all bucket commands + `onMenuEvent` cases `bucket-next`, `bucket-prev`, `bucket-new`
+- [ ] Frontend: replace sidebar Buckets placeholder with interactive `BucketsList` component
+- [ ] Frontend: `BucketBar` footer component shows active bucket + position + cycle arrows
+- [ ] Frontend: window-scoped listeners on `menu://bucket-*` call `cycleBucket(direction)` (Rust handles opening / focusing)
 - [ ] Verify: `cargo check` clean, `tsc --noEmit` clean
-- [ ] Manual test: 6 exit criteria above
+- [ ] Manual test: hit all 8 exit criteria from a fresh app launch
 
 ### Definition of done
 
-All 6 exit criteria hit; commit "M3 — multi-window + Cmd+P switcher"; update `docs/STATUS.md`. After this, M4 (buckets — the killer feature) is next.
+All exit criteria hit; commit "M4 — buckets (the killer feature)"; update `docs/STATUS.md`. After M4 lands, M5 (notarize + release) is the final slice.
 
-### After M3: what comes next
+### After M4: what comes next
 
-M4 — Buckets. Schema additions: `buckets`, `bucket_projects` with per-bucket cursor. UI: bucket bar at window footer, "Add to bucket" command in switcher. App-scoped accelerators ⌘⇧]/[ already exist for terminal cycling — buckets will need different shortcuts (lean: ⌘⌥]/[) so they don't conflict.
+M5 — Polish, sign, notarize, GitHub release. Reuse `~/.claude/notes/macos-notarization-electron-python.md` for the CI recipe. Add About dialog, app icon refresh (better than the placeholder LE monogram), code-signing entitlements check.

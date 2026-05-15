@@ -2,7 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
-import type { DirEntry, Project, PtyDataEvent, PtyExitEvent } from "./types";
+import type {
+  Bucket,
+  DirEntry,
+  Project,
+  PtyDataEvent,
+  PtyExitEvent,
+} from "./types";
 
 export async function pickFolder(): Promise<string | null> {
   return await invoke<string | null>("pick_folder");
@@ -88,6 +94,54 @@ export async function currentWindowLabel(): Promise<string> {
   return await invoke<string>("current_window_label");
 }
 
+// --- buckets ---------------------------------------------------------------
+
+export async function listBuckets(): Promise<Bucket[]> {
+  return await invoke<Bucket[]>("list_buckets");
+}
+
+export async function createBucket(name: string): Promise<Bucket> {
+  return await invoke<Bucket>("create_bucket", { name });
+}
+
+export async function deleteBucket(id: number): Promise<void> {
+  await invoke("delete_bucket", { id });
+}
+
+export async function renameBucket(id: number, name: string): Promise<void> {
+  await invoke("rename_bucket", { id, name });
+}
+
+export async function addToBucket(
+  bucketId: number,
+  projectId: number,
+): Promise<void> {
+  await invoke("add_to_bucket", { bucketId, projectId });
+}
+
+export async function removeFromBucket(
+  bucketId: number,
+  projectId: number,
+): Promise<void> {
+  await invoke("remove_from_bucket", { bucketId, projectId });
+}
+
+export async function setActiveBucket(id: number | null): Promise<void> {
+  await invoke("set_active_bucket", { id });
+}
+
+export async function getActiveBucket(): Promise<number | null> {
+  return await invoke<number | null>("get_active_bucket");
+}
+
+export async function cycleBucket(direction: 1 | -1): Promise<Project | null> {
+  return await invoke<Project | null>("cycle_bucket", { direction });
+}
+
+export async function onBucketsChanged(cb: () => void): Promise<UnlistenFn> {
+  return await listen<void>("buckets://changed", () => cb());
+}
+
 // --- menu events -----------------------------------------------------------
 
 export async function onMenuEvent(
@@ -96,7 +150,10 @@ export async function onMenuEvent(
     | "terminal-close"
     | "terminal-next"
     | "terminal-prev"
-    | "quick-switcher",
+    | "quick-switcher"
+    | "bucket-next"
+    | "bucket-prev"
+    | "bucket-new",
   cb: () => void,
 ): Promise<UnlistenFn> {
   // Scope to the current webview window. The Rust side emits with

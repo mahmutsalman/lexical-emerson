@@ -31,18 +31,20 @@ Not an IDE in the Monaco/LSP sense. The terminal is the editor (because Claude C
 | **M1** | Skeleton window with working terminal | `claude` works inside the PTY, file tree browseable | 2–3 days |
 | **M2** | Persistence + recent projects + **multi-terminal tabs** | Recent list smart-sorted; multiple terminals per window via a tab strip; macOS menu has Terminal submenu with Cmd+T | 2–3 days |
 | **M3** | Multi-window + Cmd+P switcher | "Open in new window" via Recent/Cmd+P, focused-window-only menu events, de-dup so at most one window per project | 2 days |
-| **M4** | Buckets (the killer feature) | `Cmd+Shift+]` cycles bucket ring; persists cursor | 2–3 days |
+| **M4** | Buckets (the killer feature) | `Cmd+J` cycles bucket ring across windows; persists cursor; sidebar bucket management | 2–3 days |
 | **M5** | Polish, sign, notarize, release | DMG installs on clean Mac, no Gatekeeper warning | 1–2 days |
 
 Each milestone is **independently usable**. Stop after any one and still have a useful tool.
 
 ## Active slice
 
-**Current: M3 — Multi-window + Cmd+P switcher.**
+**Current: M4 — Buckets (the killer feature).**
 
-See `docs/tasks.md` for M3's working tasks.
+See `docs/tasks.md` for M4's working tasks.
 
-M2 is complete (commit `02c0241`): rusqlite WAL store with smart-sort, Recent Projects sidebar, native macOS Terminal menu, per-project terminal tabs that survive project switches, auto-restore last project on launch.
+M3 is complete (commit `58999a8`): multi-window project switcher with Cmd+P fuzzy modal, native macOS menu routing to focused window only, window-label identity, Tauri v2 listener-scoping fix.
+
+M2 is complete (commit `02c0241`): rusqlite WAL store with smart-sort, Recent Projects sidebar, native macOS Terminal menu, per-project terminal tabs surviving project switches.
 
 M1 is complete (commit `3400063`): skeleton window + working PTY-backed terminal.
 
@@ -55,6 +57,7 @@ See `docs/ADRs/` for the load-bearing choices:
 - ADR-0004 — Separate windows over a tabbed UI (project-level)
 - ADR-0005 — Terminal tabs *within* a project window (terminal-level)
 - ADR-0006 — Window-to-project identity and the navigate/mutate split
+- ADR-0007 — Bucket model: ordered ring with persisted cursor
 
 ## Predicted gotchas (mitigations baked into M1)
 
