@@ -605,11 +605,24 @@
   padding: 6px 0;
 }
 
+.sidebar-pinned-row,
+.sidebar-project-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .sidebar-pinned-name {
   font-size: 13px;
   font-weight: 500;
   color: #e8e8ea;
   word-break: break-all;
+  min-width: 0;
+}
+
+.sidebar-project-row .sidebar-project-path {
+  min-width: 0;
 }
 
 .sidebar-pinned-hint {
@@ -619,32 +632,74 @@
   font-style: italic;
 }
 
-.sidebar-pinned-name::before {
-  content: "";
-  display: inline-block;
-  width: 8px;
-  height: 8px;
+.color-dot-trigger {
+  appearance: none;
+  padding: 0;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  margin-right: 6px;
-  vertical-align: middle;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   background: var(--proj-accent, transparent);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 80ms ease;
 }
 
-.color-picker {
+.color-dot-trigger:hover {
+  transform: scale(1.2);
+}
+
+.color-dot-trigger.is-unset {
+  background: transparent;
+  border-style: dashed;
+  border-color: #5e5e66;
+}
+
+.color-popover {
+  position: fixed;
+  z-index: 2000;
+  padding: 8px;
+  background: #1c1c20;
+  border: 1px solid #2e2e34;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 8px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.color-popover-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 18px);
+  gap: 6px;
+}
+
+.color-popover-clear {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: #b0b0b8;
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.color-popover-clear:hover {
+  background: #2a2a31;
+  color: #ffffff;
 }
 
 .color-swatch {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   border: 1.5px solid transparent;
   padding: 0;
   background-clip: padding-box;
+  cursor: pointer;
   transition: transform 80ms ease;
 }
 
@@ -654,7 +709,7 @@
 
 .color-swatch.selected {
   border-color: #e8e8ea;
-  box-shadow: 0 0 0 2px #131316, 0 0 0 3px var(--proj-accent, transparent);
+  box-shadow: 0 0 0 2px #1c1c20, 0 0 0 3px var(--proj-accent, currentColor);
 }
 
 .switcher-overlay {

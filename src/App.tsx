@@ -284,16 +284,18 @@ export const App: Component = () => {
                 }
               >
                 <div class="sidebar-pinned-project">
-                  <div class="sidebar-pinned-name">{projectName()}</div>
+                  <div class="sidebar-pinned-row">
+                    <Show when={currentProject()}>
+                      {(proj) => (
+                        <ProjectColorPicker
+                          project={proj()}
+                          onChange={(updated) => setCurrentProject(updated)}
+                        />
+                      )}
+                    </Show>
+                    <div class="sidebar-pinned-name">{projectName()}</div>
+                  </div>
                   <div class="sidebar-pinned-hint">pinned to this window</div>
-                  <Show when={currentProject()}>
-                    {(proj) => (
-                      <ProjectColorPicker
-                        project={proj()}
-                        onChange={(updated) => setCurrentProject(updated)}
-                      />
-                    )}
-                  </Show>
                 </div>
               </Show>
             }
@@ -302,17 +304,19 @@ export const App: Component = () => {
               {projectPath() ? "Switch folder…" : "Open folder…"}
             </button>
             <Show when={projectPath()}>
-              <div class="sidebar-project-path" title={projectPath() ?? ""}>
-                {projectName()}
+              <div class="sidebar-project-row">
+                <Show when={currentProject()}>
+                  {(proj) => (
+                    <ProjectColorPicker
+                      project={proj()}
+                      onChange={(updated) => setCurrentProject(updated)}
+                    />
+                  )}
+                </Show>
+                <div class="sidebar-project-path" title={projectPath() ?? ""}>
+                  {projectName()}
+                </div>
               </div>
-              <Show when={currentProject()}>
-                {(proj) => (
-                  <ProjectColorPicker
-                    project={proj()}
-                    onChange={(updated) => setCurrentProject(updated)}
-                  />
-                )}
-              </Show>
             </Show>
           </Show>
         </div>
