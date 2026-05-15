@@ -40,13 +40,6 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   const [is3dByProject, setIs3dByProject] = createSignal<
     Record<string, boolean>
   >({});
-  // Free-rotation offset on top of the auto-centred-on-active rotation. ⌘⌥←
-  // and ⌘⌥→ add/subtract a slot-angle so the user can "look around" the
-  // cylinder without changing which terminal is focused. Resets to 0 whenever
-  // ⌘K cycles focus (snap-to-active) or the 3D toggle flips.
-  const [manualRotationByProject, setManualRotationByProject] = createSignal<
-    Record<string, number>
-  >({});
   const [panelWidth, setPanelWidth] = createSignal(800);
 
   let stackEl!: HTMLDivElement;
@@ -94,19 +87,15 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   const perspectivePx = () => Math.max(panelWidth() * 1.2, 1000);
   const activeIdx = () =>
     projectTabs().findIndex((t) => t.id === activeId());
-  // Auto-centre the active terminal (its world angle becomes 0°, facing the
-  // viewer straight-on) plus the user's manual rotation offset. Panoramic
-  // (no auto-centre) would leave the active terminal tilted at its slot
-  // angle — readable but visibly off-axis. Auto-centre keeps the focused
-  // terminal in the natural reading position; ⌘⌥←/→ lets the user pan
-  // around the cylinder when they want to peek at non-active slots.
+  // Auto-centre the active terminal: its world angle becomes 0°, facing the
+  // viewer straight-on. ⌘K / ⌘⇧K and ⌘⌥→ / ⌘⌥← all cycle the active
+  // terminal and let this formula re-centre the cylinder.
   const wrapperRotation = () => {
     const n = projectTabs().length;
     if (n < 2) return 0;
     const idx = activeIdx();
-    const autoCenter = idx < 0 ? 0 : -slotOffsetDeg(idx, n);
-    const manual = manualRotationByProject()[props.projectPath] ?? 0;
-    return autoCenter + manual;
+    if (idx < 0) return 0;
+    return -slotOffsetDeg(idx, n);
   };
 
   const setActiveForCurrent = (id: string) => {
@@ -161,29 +150,6 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     if (idx === -1) return;
     const next = (idx + delta + arr.length) % arr.length;
     setActiveForCurrent(arr[next].id);
-    // Snap back to auto-centre: any free-rotation pan the user did with
-    // ⌘⌥←/→ is discarded so ⌘K predictably "jumps to" the new active.
-    resetManualRotation();
-  };
-
-  const resetManualRotation = () => {
-    setManualRotationByProject((prev) => {
-      if (!(props.projectPath in prev)) return prev;
-      const next = { ...prev };
-      delete next[props.projectPath];
-      return next;
-    });
-  };
-
-  const nudgeManualRotation = (deltaSign: 1 | -1) => {
-    const n = projectTabs().length;
-    if (n < 2) return;
-    const step = slotAngleDeg(n);
-    setManualRotationByProject((prev) => ({
-      ...prev,
-      [props.projectPath]:
-        (prev[props.projectPath] ?? 0) + deltaSign * step,
-    }));
   };
 
   // Whenever the project changes (or on first mount), ensure this project
@@ -214,11 +180,10 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     activeId();
     focusActive();
   });
-  // Same belt-and-suspenders on 3D toggle and manual rotation — the
-  // accelerator that triggered them stole the textarea's focus.
+  // Same belt-and-suspenders on 3D toggle — the accelerator that triggered
+  // it stole the textarea's focus.
   createEffect(() => {
     is3d();
-    manualRotationByProject();
     focusActive();
   });
 
@@ -250,17 +215,6 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
           ...prev,
           [props.projectPath]: !prev[props.projectPath],
         }));
-        // Drop any free-rotation pan so the toggle always starts from the
-        // canonical "active centred" view.
-        resetManualRotation();
-      }),
-      onMenuEvent("terminal-rotate-left", () => {
-        if (!is3d()) return;
-        nudgeManualRotation(+1);
-      }),
-      onMenuEvent("terminal-rotate-right", () => {
-        if (!is3d()) return;
-        nudgeManualRotation(-1);
       }),
     ]);
 

@@ -233,8 +233,6 @@ export async function onMenuEvent(
     | "terminal-next"
     | "terminal-prev"
     | "terminal-toggle-3d"
-    | "terminal-rotate-left"
-    | "terminal-rotate-right"
     | "quick-switcher"
     | "bucket-next"
     | "bucket-prev"

@@ -111,8 +111,10 @@ fn main() {
                 "terminal_next" => "menu://terminal-next",
                 "terminal_prev" => "menu://terminal-prev",
                 "terminal_3d" => "menu://terminal-toggle-3d",
-                "terminal_rotate_left" => "menu://terminal-rotate-left",
-                "terminal_rotate_right" => "menu://terminal-rotate-right",
+                // The arrow shortcuts share the cycle events with ⌘⇧K / ⌘K
+                // so typing always follows the visible centred terminal.
+                "terminal_rotate_left" => "menu://terminal-prev",
+                "terminal_rotate_right" => "menu://terminal-next",
                 "go_quick_switcher" => "menu://quick-switcher",
                 "bucket_next" => "menu://bucket-next",
                 "bucket_prev" => "menu://bucket-prev",
@@ -233,11 +235,11 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .accelerator("CmdOrCtrl+Alt+3")
         .build(app)?;
     let terminal_rotate_left =
-        MenuItemBuilder::with_id("terminal_rotate_left", "Rotate Arc Left")
+        MenuItemBuilder::with_id("terminal_rotate_left", "Previous Terminal (Arrow)")
             .accelerator("CmdOrCtrl+Alt+Left")
             .build(app)?;
     let terminal_rotate_right =
-        MenuItemBuilder::with_id("terminal_rotate_right", "Rotate Arc Right")
+        MenuItemBuilder::with_id("terminal_rotate_right", "Next Terminal (Arrow)")
             .accelerator("CmdOrCtrl+Alt+Right")
             .build(app)?;
 
