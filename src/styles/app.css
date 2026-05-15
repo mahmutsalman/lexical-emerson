@@ -1,0 +1,136 @@
+.app-shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  grid-template-rows: 1fr 28px;
+  height: 100vh;
+  width: 100vw;
+}
+
+.sidebar {
+  grid-column: 1;
+  grid-row: 1;
+  background: #131316;
+  border-right: 1px solid #2a2a2f;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-section {
+  padding: 12px;
+  border-bottom: 1px solid #2a2a2f;
+}
+
+.sidebar-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #7a7a82;
+  margin-bottom: 8px;
+}
+
+.sidebar-button {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: #c9c9d0;
+  font-size: 12px;
+}
+
+.sidebar-button:hover {
+  background: #232328;
+  color: #ffffff;
+}
+
+.sidebar-button.primary {
+  background: #2d5cc8;
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.sidebar-button.primary:hover {
+  background: #3469d9;
+}
+
+.workspace {
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 0;
+}
+
+.file-tree-panel {
+  background: #18181b;
+  border-right: 1px solid #2a2a2f;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 0;
+}
+
+.terminal-panel {
+  background: #0e0e10;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-panel .xterm {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+}
+
+.bucket-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: #0e0e10;
+  border-top: 1px solid #2a2a2f;
+  font-size: 11px;
+  color: #7a7a82;
+  gap: 12px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #5e5e66;
+  font-size: 13px;
+  gap: 12px;
+}
+
+.tree-node {
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #c9c9d0;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.tree-node:hover {
+  background: #232328;
+}
+
+.tree-node.directory {
+  font-weight: 500;
+}
+
+.tree-node .indent {
+  display: inline-block;
+}
+
+.tree-node .icon {
+  display: inline-block;
+  width: 14px;
+  color: #7a7a82;
+  margin-right: 4px;
+}

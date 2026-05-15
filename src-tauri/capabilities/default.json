@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the main Lexical Emerson window",
+  "windows": ["main", "project-*"],
+  "platforms": ["macOS"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-get-all-windows",
+    "core:window:allow-set-title",
+    "core:event:allow-emit",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:webview:allow-create-webview-window",
+    "dialog:default",
+    "dialog:allow-open"
+  ]
+}
