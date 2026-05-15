@@ -93,6 +93,29 @@ impl Store {
         let recents = self.list_recents(1)?;
         Ok(recents.into_iter().next())
     }
+
+    pub fn get_by_id(&self, id: i64) -> Result<Option<Project>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        match conn.query_row(
+            "SELECT id, path, name, last_focused_at, last_active_at
+               FROM projects WHERE id = ?1",
+            params![id],
+            project_from_row,
+        ) {
+            Ok(p) => Ok(Some(p)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn mark_focused(&self, path: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE projects SET last_focused_at = datetime('now') WHERE path = ?1",
+            params![path],
+        )?;
+        Ok(())
+    }
 }
 
 fn select_by_path(conn: &Connection, path: &str) -> Result<Project> {

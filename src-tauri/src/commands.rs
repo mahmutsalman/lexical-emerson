@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::projects::folder_basename;
@@ -143,4 +143,53 @@ pub fn mark_active(state: State<AppState>, path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn last_project(state: State<AppState>) -> Result<Option<Project>, String> {
     state.store.last_project().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_project_by_id(
+    state: State<AppState>,
+    id: i64,
+) -> Result<Option<Project>, String> {
+    state.store.get_by_id(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn mark_focused(state: State<AppState>, path: String) -> Result<(), String> {
+    state.store.mark_focused(&path).map_err(|e| e.to_string())
+}
+
+// Spawn a dedicated window for the given project path, or focus the existing
+// one if it's already open. See ADR-0006.
+#[tauri::command]
+pub fn request_open_project(
+    app: AppHandle,
+    state: State<AppState>,
+    path: String,
+) -> Result<Project, String> {
+    let name = folder_basename(&path);
+    let project = state
+        .store
+        .register_or_focus(&path, &name)
+        .map_err(|e| e.to_string())?;
+    let label = format!("project-{}", project.id);
+
+    if let Some(existing) = app.get_webview_window(&label) {
+        existing.show().map_err(|e| e.to_string())?;
+        existing.set_focus().map_err(|e| e.to_string())?;
+        return Ok(project);
+    }
+
+    let title = format!("Lexical Emerson — {}", project.name);
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
+        .title(title)
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(700.0, 480.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(project)
+}
+
+#[tauri::command]
+pub fn current_window_label(window: tauri::Window) -> String {
+    window.label().to_string()
 }

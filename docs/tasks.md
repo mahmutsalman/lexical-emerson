@@ -1,37 +1,38 @@
-# Tasks — Current Slice (M2)
+# Tasks — Current Slice (M3)
 
 > Regenerated each milestone from `plan.md` + recent ADRs. Do not edit by hand long-term — rewrite at slice boundaries.
 
-## Slice: M2 — Persistence + recent projects + multi-terminal tabs
+## Slice: M3 — Multi-window + Cmd+P switcher
 
 **Exit criteria** (all must hit):
 
-1. Reopen Lexical Emerson after quit → last project's path restores.
-2. Recent Projects sidebar shows up to 20 entries, sorted by smart-sort (`max(last_active_at, last_focused_at - 1h)`), clickable.
-3. Native macOS menu bar has a "Terminal" entry with "New Terminal" (Cmd+T), "Close Terminal" (Cmd+W), "Next/Prev Terminal" (Cmd+Shift+]/[).
-4. Inside the terminal panel: tab strip on top showing all open terminals, click to switch, x to close, + to add.
-5. Each terminal's scrollback survives switching tabs (xterm instance stays alive).
+1. Cmd+P from any window opens a fuzzy modal listing all known projects.
+2. Pressing Enter on a project either focuses its existing window (if open) or spawns a new one.
+3. Clicking a project in the Recent sidebar opens it in a new window (not mutates current).
+4. "Switch folder…" button still mutates the current window's project (M2 semantics preserved).
+5. ⌘T / ⌘W / ⌘⇧]/[ menu shortcuts affect only the focused window's terminals, not all windows.
+6. Closing a project window kills its PTYs (verifiable via `ps`); other windows unaffected.
 
 ### Tasks
 
-- [x] Update `plan.md` + write `ADR-0005-terminal-tabs-within-project-window.md`
-- [ ] Backend: add `rusqlite` (bundled, WAL) to `Cargo.toml`
-- [ ] Backend: `src-tauri/src/store.rs` — schema, migrations, queries
-- [ ] Backend: `src-tauri/src/projects.rs` — `Project` struct, store integration
-- [ ] Backend: Tauri commands `list_recents`, `mark_focused`, `mark_active`, `register_project`
-- [ ] Backend: native macOS menu in `main.rs` (`tauri::menu::Menu`) + `on_menu_event` forwarder
-- [ ] Frontend: `RecentProjects.tsx` — renders sidebar list, polls or invalidates on switch
-- [ ] Frontend: `TerminalsView.tsx` — tab strip + N TerminalPane instances + display:none for inactive
-- [ ] Frontend: extract TerminalPane to accept `terminalId` + `cwd` props; lifecycle keyed by id
-- [ ] Frontend: listen for `menu://new-terminal`, `menu://close-terminal`, `menu://cycle-terminal`
-- [ ] Frontend: 30s-debounced `mark_active` call from TerminalPane on `onData` activity
+- [x] Write `ADR-0006-window-project-identity.md`
+- [x] Update `plan.md` and `tasks.md`
+- [ ] Backend: `store::get_by_id`
+- [ ] Backend: commands `request_open_project`, `get_project_by_id`, `mark_focused`
+- [ ] Backend: add "Go" submenu with Quick Switcher (Cmd+P)
+- [ ] Backend: route `on_menu_event` only to focused window (M2 emitted to all)
+- [ ] Frontend: `ipc.ts` — wrappers for `requestOpenProject`, `getProjectById`, `markFocused`, `getCurrentWindowLabel`
+- [ ] Frontend: `App.tsx` branches on window label (main vs project-N)
+- [ ] Frontend: Recent click + new "Switch folder" semantics
+- [ ] Frontend: `QuickSwitcher.tsx` modal — fuzzy fzf-style scoring, keyboard nav
+- [ ] Frontend: window-focus listener calls `markFocused`
 - [ ] Verify: `cargo check` clean, `tsc --noEmit` clean
-- [ ] Manual test: hit all 5 exit criteria from a fresh quit
+- [ ] Manual test: 6 exit criteria above
 
 ### Definition of done
 
-All 5 exit criteria hit, dev test passes, no warnings in console. After this lands, commit "M2 — persistence + recent + multi-terminal tabs" and update `docs/STATUS.md`.
+All 6 exit criteria hit; commit "M3 — multi-window + Cmd+P switcher"; update `docs/STATUS.md`. After this, M4 (buckets — the killer feature) is next.
 
-### After M2: what comes next
+### After M3: what comes next
 
-M3 — multi-window + Cmd+P switcher. Pre-decision: the SQLite schema in M2 already supports multiple open windows (one window = one project, but `last_focused_at` is per-project not per-window — fine). M3 adds `WindowId → ProjectId` mapping in Rust AppState and the Cmd+P fuzzy modal in Solid.
+M4 — Buckets. Schema additions: `buckets`, `bucket_projects` with per-bucket cursor. UI: bucket bar at window footer, "Add to bucket" command in switcher. App-scoped accelerators ⌘⇧]/[ already exist for terminal cycling — buckets will need different shortcuts (lean: ⌘⌥]/[) so they don't conflict.

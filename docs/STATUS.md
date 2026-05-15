@@ -4,26 +4,39 @@
 
 ## Current slice
 
-**M2 — Persistence + recent projects + multi-terminal tabs.**
+**M3 — Multi-window + Cmd+P switcher (structurally complete, awaiting smoke test).**
 
 ## Where we are
 
-M1 shipped: window, file tree, single terminal, `<Show keyed>` fix for switching projects, first commit `3400063`.
+**M3 structural cut**:
+- Window-label identity: `main` (launcher) vs `project-<id>` (pinned). Frontend reads it via the `current_window_label` IPC.
+- Native macOS menu has a new **Go** submenu with **Quick Switcher** (⌘P).
+- Menu events route only to the *focused* window — ⌘T no longer fires in every open window.
+- New backend commands: `request_open_project` (spawn-or-focus), `get_project_by_id`, `mark_focused`, `current_window_label`.
+- `QuickSwitcher` modal: fzf-style scoring with basename + start-of-word bonuses; ↑↓ navigate, Enter open, Esc close, click-outside close.
+- App.tsx branches on window label — main has Switch folder, project-N is pinned (no Switch folder, sidebar shows "pinned to this window").
+- Recent click + Cmd+P → `requestOpenProject` (new window or focus existing).
+- Window-focus listener bumps `last_focused_at` and refreshes Recent.
+- ADR-0006 documents the navigate-vs-mutate split.
 
-M2 structurally complete: rusqlite WAL store, `Project` schema with `last_focused_at` / `last_active_at`, smart-sort query (`MAX(last_active, last_focused - 1h)`), Tauri commands (`open_project`, `list_recents`, `mark_active`, `last_project`), native macOS menu with `Terminal` submenu (`Cmd+T` New, `Cmd+W` Close, `Cmd+Shift+]/[` cycle), `TerminalsView` component with tab strip + N TerminalPane instances + `display:none` for inactive tabs, `RecentProjects` sidebar component, App.tsx auto-restores `lastProject()` on launch and refreshes recents on every switch.
+**M2 shipped** (commit `02c0241`):
+- rusqlite WAL store + `Project` schema, smart-sort `MAX(last_active, last_focused - 1h)`.
+- Native macOS Terminal menu — New/Close/Next/Prev terminal with ⌘T, ⌘W, ⌘⇧], ⌘⇧[.
+- `TerminalsView` with per-project tab persistence — switching projects keeps their terminals alive (xterm + PTY both survive); coming back restores the original active tab.
+- `RecentProjects` sidebar, smart-sorted, with active highlight.
+- Auto-restore last project on launch.
 
-`cargo check` and `npx tsc --noEmit` both clean. The running dev server already rebuilt the binary.
+**M1 shipped** (commit `3400063`): window, file tree, single PTY-backed terminal, Switch folder works.
 
-## Next concrete step (user-facing)
+## Next concrete step (smoke test M3)
 
-Smoke-test the M2 exit criteria in the running app window:
+1. **⌘P** from the main window: opens the QuickSwitcher. Type to filter; Enter on a project opens a new project-N window (or focuses an existing one).
+2. **Recent click** in the sidebar: opens the project in a new window now (not mutates current). Switch folder in main still mutates main.
+3. **⌘T in a project-N window**: opens a tab only in that window. Other windows' tab counts don't change.
+4. **Close a project window**: `ps -axm | grep zsh` drops by the number of terminals that window had open. The other windows survive.
+5. **Focus another project window**: its row bubbles to the top of Recent in every visible sidebar.
 
-1. **Native menu**: top of screen should show **Lexical Emerson | File | Edit | View | Terminal | Window** — verify Terminal menu has New Terminal (⌘T), Close Terminal (⌘W), Next/Previous Terminal (⌘⇧]/[).
-2. **Multi-terminal tabs**: pick a folder, then ⌘T a few times — terminal panel grows tabs. Click each to switch; scrollback survives. `+` button adds a tab; `×` on a tab closes it (last one auto-keeps one open).
-3. **Recent projects**: switch between 2–3 folders. The Recent section in the sidebar should populate, sorted by smart-sort. The active project is highlighted blue.
-4. **Persistence**: ⌘Q the app. Relaunch (`cargo tauri dev` or just open the running window again). The last project should auto-restore.
-
-If all four hit: M2 done. Commit and move to M3 (multi-window + Cmd+P switcher).
+If all five hit, commit M3 and move to M4 (buckets — the killer feature).
 
 ## Recent decisions (last 3)
 

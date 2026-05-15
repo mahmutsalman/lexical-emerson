@@ -1,15 +1,31 @@
-import { Component, createSignal, onMount, Show } from "solid-js";
+import { Component, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { FileTree } from "./components/FileTree";
+import { QuickSwitcher } from "./components/QuickSwitcher";
 import { RecentProjects } from "./components/RecentProjects";
 import { TerminalsView } from "./components/TerminalsView";
-import { lastProject, openProject, pickFolder } from "./lib/ipc";
+import {
+  currentWindowLabel,
+  getProjectById,
+  lastProject,
+  markFocused,
+  openProject,
+  pickFolder,
+  requestOpenProject,
+} from "./lib/ipc";
 
 export const App: Component = () => {
+  const [windowLabel, setWindowLabel] = createSignal<string>("main");
   const [projectPath, setProjectPath] = createSignal<string | null>(null);
   const [recentsKey, setRecentsKey] = createSignal(0);
 
-  const switchTo = async (path: string) => {
+  const isMain = () => windowLabel() === "main";
+
+  // Mutates the CURRENT window's project. Only available in the main window —
+  // project-N windows are pinned to their project (ADR-0006).
+  const mutateCurrentProject = async (path: string) => {
     try {
       await openProject(path);
       setProjectPath(path);
@@ -22,23 +38,67 @@ export const App: Component = () => {
   const openFolder = async () => {
     try {
       const picked = await pickFolder();
-      if (picked) await switchTo(picked);
+      if (picked) await mutateCurrentProject(picked);
     } catch (err) {
       console.error("pick_folder failed:", err);
     }
   };
 
-  onMount(async () => {
+  // Opens a project in its dedicated window. Focuses if already open.
+  const navigateToProject = async (path: string) => {
     try {
-      const last = await lastProject();
-      if (last) {
-        setProjectPath(last.path);
-        setRecentsKey((v) => v + 1);
-      }
+      await requestOpenProject(path);
+      setRecentsKey((v) => v + 1);
     } catch (err) {
-      console.error("lastProject failed:", err);
+      console.error("requestOpenProject failed:", err);
     }
+  };
+
+  onMount(async () => {
+    let label = "main";
+    try {
+      label = await currentWindowLabel();
+      setWindowLabel(label);
+    } catch (err) {
+      console.warn("currentWindowLabel failed:", err);
+    }
+
+    if (label === "main") {
+      try {
+        const last = await lastProject();
+        if (last) {
+          setProjectPath(last.path);
+          setRecentsKey((v) => v + 1);
+        }
+      } catch (err) {
+        console.error("lastProject failed:", err);
+      }
+    } else if (label.startsWith("project-")) {
+      const id = parseInt(label.slice("project-".length), 10);
+      if (Number.isFinite(id)) {
+        try {
+          const proj = await getProjectById(id);
+          if (proj) {
+            setProjectPath(proj.path);
+            setRecentsKey((v) => v + 1);
+          }
+        } catch (err) {
+          console.error("getProjectById failed:", err);
+        }
+      }
+    }
+
+    // Bump last_focused_at whenever this window gains focus.
+    unlistenFocus = await getCurrentWindow().onFocusChanged((event) => {
+      if (!event.payload) return;
+      const p = projectPath();
+      if (p) markFocused(p).catch(() => {});
+      setRecentsKey((v) => v + 1);
+    });
   });
+
+  let unlistenFocus: UnlistenFn | undefined;
+  onCleanup(() => unlistenFocus?.());
 
   const projectName = () => {
     const p = projectPath();
@@ -52,13 +112,30 @@ export const App: Component = () => {
       <aside class="sidebar">
         <div class="sidebar-section">
           <div class="sidebar-section-title">Project</div>
-          <button class="sidebar-button primary" onClick={openFolder}>
-            {projectPath() ? "Switch folder…" : "Open folder…"}
-          </button>
-          <Show when={projectPath()}>
-            <div class="sidebar-project-path" title={projectPath() ?? ""}>
-              {projectName()}
-            </div>
+          <Show
+            when={isMain()}
+            fallback={
+              <Show
+                when={projectPath()}
+                fallback={
+                  <div class="sidebar-placeholder">loading project…</div>
+                }
+              >
+                <div class="sidebar-pinned-project">
+                  <div class="sidebar-pinned-name">{projectName()}</div>
+                  <div class="sidebar-pinned-hint">pinned to this window</div>
+                </div>
+              </Show>
+            }
+          >
+            <button class="sidebar-button primary" onClick={openFolder}>
+              {projectPath() ? "Switch folder…" : "Open folder…"}
+            </button>
+            <Show when={projectPath()}>
+              <div class="sidebar-project-path" title={projectPath() ?? ""}>
+                {projectName()}
+              </div>
+            </Show>
           </Show>
         </div>
 
@@ -67,7 +144,7 @@ export const App: Component = () => {
           <RecentProjects
             refreshKey={recentsKey()}
             activePath={projectPath()}
-            onPick={(path) => switchTo(path)}
+            onPick={(path) => navigateToProject(path)}
           />
         </div>
 
@@ -82,10 +159,12 @@ export const App: Component = () => {
         fallback={
           <div class="workspace" style={{ "grid-template-columns": "1fr" }}>
             <div class="empty-state">
-              <div>No folder open</div>
-              <button class="sidebar-button primary" onClick={openFolder}>
-                Open folder…
-              </button>
+              <div>{isMain() ? "No folder open" : "loading…"}</div>
+              <Show when={isMain()}>
+                <button class="sidebar-button primary" onClick={openFolder}>
+                  Open folder…
+                </button>
+              </Show>
             </div>
           </div>
         }
@@ -103,8 +182,12 @@ export const App: Component = () => {
       </Show>
 
       <footer class="bucket-bar">
-        <span>Lexical Emerson v0.1 — M2 (persistence + multi-terminal)</span>
+        <span>
+          Lexical Emerson v0.1 — M3 {isMain() ? "(launcher)" : `(${windowLabel()})`}
+        </span>
       </footer>
+
+      <QuickSwitcher />
     </div>
   );
 };

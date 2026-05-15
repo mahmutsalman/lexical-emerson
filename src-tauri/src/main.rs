@@ -9,7 +9,7 @@ mod store;
 use std::sync::Mutex;
 
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, EventTarget, Manager};
 
 use pty::PtyManager;
 use store::Store;
@@ -37,7 +37,11 @@ fn main() {
             commands::open_project,
             commands::list_recents,
             commands::mark_active,
+            commands::mark_focused,
             commands::last_project,
+            commands::get_project_by_id,
+            commands::request_open_project,
+            commands::current_window_label,
         ])
         .setup(|app| {
             let app_data = app
@@ -60,21 +64,31 @@ fn main() {
             Ok(())
         })
         .on_menu_event(|app, event| {
-            match event.id().as_ref() {
-                "terminal_new" => {
-                    let _ = app.emit("menu://terminal-new", ());
+            let event_name = match event.id().as_ref() {
+                "terminal_new" => "menu://terminal-new",
+                "terminal_close" => "menu://terminal-close",
+                "terminal_next" => "menu://terminal-next",
+                "terminal_prev" => "menu://terminal-prev",
+                "go_quick_switcher" => "menu://quick-switcher",
+                _ => return,
+            };
+            // Route menu events to the focused window only — broadcasting
+            // would fire ⌘T (etc.) in every open window simultaneously.
+            // See ADR-0006. Note: WebviewWindow::emit() is GLOBAL in Tauri v2,
+            // not scoped to the window; we must use emit_to with an explicit
+            // EventTarget::WebviewWindow target.
+            for (label, window) in app.webview_windows() {
+                if window.is_focused().unwrap_or(false) {
+                    let _ = app.emit_to(
+                        EventTarget::WebviewWindow { label },
+                        event_name,
+                        (),
+                    );
+                    return;
                 }
-                "terminal_close" => {
-                    let _ = app.emit("menu://terminal-close", ());
-                }
-                "terminal_next" => {
-                    let _ = app.emit("menu://terminal-next", ());
-                }
-                "terminal_prev" => {
-                    let _ = app.emit("menu://terminal-prev", ());
-                }
-                _ => {}
             }
+            // Fallback if no window claims focus (rare; e.g. all minimized).
+            let _ = app.emit(event_name, ());
         })
         .run(tauri::generate_context!())
         .expect("error while running Lexical Emerson");
@@ -138,6 +152,13 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .fullscreen()
         .build()?;
 
+    let go_quick_switcher = MenuItemBuilder::with_id("go_quick_switcher", "Quick Switcher…")
+        .accelerator("CmdOrCtrl+P")
+        .build(app)?;
+    let go_submenu = SubmenuBuilder::new(app, "Go")
+        .item(&go_quick_switcher)
+        .build()?;
+
     let window_submenu = SubmenuBuilder::new(app, "Window")
         .minimize()
         .build()?;
@@ -148,6 +169,7 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
             &file_submenu,
             &edit_submenu,
             &view_submenu,
+            &go_submenu,
             &terminal_submenu,
             &window_submenu,
         ])

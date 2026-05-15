@@ -30,7 +30,7 @@ Not an IDE in the Monaco/LSP sense. The terminal is the editor (because Claude C
 |---|---|---|---|
 | **M1** | Skeleton window with working terminal | `claude` works inside the PTY, file tree browseable | 2–3 days |
 | **M2** | Persistence + recent projects + **multi-terminal tabs** | Recent list smart-sorted; multiple terminals per window via a tab strip; macOS menu has Terminal submenu with Cmd+T | 2–3 days |
-| **M3** | Multi-window + Cmd+P switcher | 5 windows simultaneously, Cmd+P jumps between any | 2 days |
+| **M3** | Multi-window + Cmd+P switcher | "Open in new window" via Recent/Cmd+P, focused-window-only menu events, de-dup so at most one window per project | 2 days |
 | **M4** | Buckets (the killer feature) | `Cmd+Shift+]` cycles bucket ring; persists cursor | 2–3 days |
 | **M5** | Polish, sign, notarize, release | DMG installs on clean Mac, no Gatekeeper warning | 1–2 days |
 
@@ -38,11 +38,13 @@ Each milestone is **independently usable**. Stop after any one and still have a 
 
 ## Active slice
 
-**Current: M2 — Persistence + recent projects + multi-terminal tabs.**
+**Current: M3 — Multi-window + Cmd+P switcher.**
 
-See `docs/tasks.md` for M2's working tasks.
+See `docs/tasks.md` for M3's working tasks.
 
-M1 is complete: `cargo tauri dev` launches a window, file tree populates from a picked folder, PTY shell runs `claude` correctly, the `<Show keyed>` fix re-spawns the PTY when the project switches.
+M2 is complete (commit `02c0241`): rusqlite WAL store with smart-sort, Recent Projects sidebar, native macOS Terminal menu, per-project terminal tabs that survive project switches, auto-restore last project on launch.
+
+M1 is complete (commit `3400063`): skeleton window + working PTY-backed terminal.
 
 ## Architectural decisions
 
@@ -52,6 +54,7 @@ See `docs/ADRs/` for the load-bearing choices:
 - ADR-0003 — rusqlite (SQLite) over a JSON file for state
 - ADR-0004 — Separate windows over a tabbed UI (project-level)
 - ADR-0005 — Terminal tabs *within* a project window (terminal-level)
+- ADR-0006 — Window-to-project identity and the navigate/mutate split
 
 ## Predicted gotchas (mitigations baked into M1)
 

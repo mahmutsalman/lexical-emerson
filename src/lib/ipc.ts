@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import type { DirEntry, Project, PtyDataEvent, PtyExitEvent } from "./types";
 
@@ -71,13 +72,40 @@ export async function lastProject(): Promise<Project | null> {
   return await invoke<Project | null>("last_project");
 }
 
+export async function getProjectById(id: number): Promise<Project | null> {
+  return await invoke<Project | null>("get_project_by_id", { id });
+}
+
+export async function markFocused(path: string): Promise<void> {
+  await invoke("mark_focused", { path });
+}
+
+export async function requestOpenProject(path: string): Promise<Project> {
+  return await invoke<Project>("request_open_project", { path });
+}
+
+export async function currentWindowLabel(): Promise<string> {
+  return await invoke<string>("current_window_label");
+}
+
 // --- menu events -----------------------------------------------------------
 
 export async function onMenuEvent(
-  id: "terminal-new" | "terminal-close" | "terminal-next" | "terminal-prev",
+  id:
+    | "terminal-new"
+    | "terminal-close"
+    | "terminal-next"
+    | "terminal-prev"
+    | "quick-switcher",
   cb: () => void,
 ): Promise<UnlistenFn> {
-  return await listen<void>(`menu://${id}`, () => cb());
+  // Scope to the current webview window. The Rust side emits with
+  // EventTarget::WebviewWindow { label } — but the default `listen(...)` from
+  // @tauri-apps/api/event uses target=Any, which is a wildcard that catches
+  // every emit regardless of target. Using the WebviewWindow instance's own
+  // .listen() registers a target-scoped listener so only the focused window
+  // reacts. See plan: "Active fix — M3: menu events still fire in every window".
+  return await getCurrentWebviewWindow().listen<void>(`menu://${id}`, () => cb());
 }
 
 // --- base64 helpers --------------------------------------------------------
