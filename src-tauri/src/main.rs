@@ -90,6 +90,19 @@ fn main() {
             Ok(())
         })
         .on_menu_event(|app, event| {
+            // Window-cycling is purely native: focus another window. No need
+            // to round-trip through a webview, so handle it inline and bail.
+            match event.id().as_ref() {
+                "window_next" => {
+                    cycle_app_windows(app, 1);
+                    return;
+                }
+                "window_prev" => {
+                    cycle_app_windows(app, -1);
+                    return;
+                }
+                _ => {}
+            }
             let event_name = match event.id().as_ref() {
                 "terminal_new" => "menu://terminal-new",
                 "terminal_close" => "menu://terminal-close",
@@ -125,6 +138,45 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Lexical Emerson");
+}
+
+// Cycle focus across every open project window (main + project-<id>).
+// Ordering: `main` first, then project windows by numeric id ascending —
+// stable so forward/backward cycling is predictable regardless of focus
+// history. Direction +1 = next, -1 = previous. No-op when fewer than 2
+// project windows are open.
+fn cycle_app_windows(app: &tauri::AppHandle, direction: i32) {
+    fn sort_key(label: &str) -> (u8, i64) {
+        if label == "main" {
+            (0, 0)
+        } else if let Some(rest) = label.strip_prefix("project-") {
+            (1, rest.parse().unwrap_or(i64::MAX))
+        } else {
+            (2, 0)
+        }
+    }
+
+    let mut windows: Vec<(String, tauri::WebviewWindow)> = app
+        .webview_windows()
+        .into_iter()
+        .filter(|(label, _)| label == "main" || label.starts_with("project-"))
+        .collect();
+    if windows.len() < 2 {
+        return;
+    }
+    windows.sort_by(|(a, _), (b, _)| sort_key(a).cmp(&sort_key(b)));
+
+    let focused = windows
+        .iter()
+        .position(|(_, w)| w.is_focused().unwrap_or(false));
+    let n = windows.len() as i32;
+    let next_idx = match focused {
+        Some(i) => ((i as i32 + direction).rem_euclid(n)) as usize,
+        None => 0,
+    };
+    let (_, win) = &windows[next_idx];
+    let _ = win.show();
+    let _ = win.set_focus();
 }
 
 fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -229,8 +281,17 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .item(&notes_open)
         .build()?;
 
+    let window_next = MenuItemBuilder::with_id("window_next", "Cycle Window Forward")
+        .accelerator("CmdOrCtrl+Alt+J")
+        .build(app)?;
+    let window_prev = MenuItemBuilder::with_id("window_prev", "Cycle Window Backward")
+        .accelerator("CmdOrCtrl+Alt+Shift+J")
+        .build(app)?;
     let window_submenu = SubmenuBuilder::new(app, "Window")
         .minimize()
+        .separator()
+        .item(&window_next)
+        .item(&window_prev)
         .build()?;
 
     let menu = MenuBuilder::new(app)
