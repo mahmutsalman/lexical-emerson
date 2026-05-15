@@ -160,6 +160,40 @@ pub fn mark_focused(state: State<AppState>, path: String) -> Result<(), String> 
     state.store.mark_focused(&path).map_err(|e| e.to_string())
 }
 
+const COLOR_TAGS: &[&str] = &[
+    "amber", "blue", "green", "violet", "orange", "red", "sky", "teal", "pink", "lime",
+];
+
+#[tauri::command]
+pub fn set_project_color(
+    state: State<AppState>,
+    id: i64,
+    color: Option<String>,
+) -> Result<Project, String> {
+    if let Some(ref c) = color {
+        if !COLOR_TAGS.contains(&c.as_str()) {
+            return Err(format!("invalid color tag: {c}"));
+        }
+    }
+    state
+        .store
+        .set_project_color(id, color.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_project_zoom(
+    state: State<AppState>,
+    id: i64,
+    zoom: f64,
+) -> Result<Project, String> {
+    let clamped = zoom.clamp(0.75, 2.0);
+    state
+        .store
+        .set_project_zoom(id, clamped)
+        .map_err(|e| e.to_string())
+}
+
 // Spawn a dedicated window for the given project, or focus the existing one
 // if it's already open. See ADR-0006.
 //

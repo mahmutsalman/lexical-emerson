@@ -21,6 +21,8 @@ export interface Project {
   name: string;
   last_focused_at: string | null;
   last_active_at: string | null;
+  color: string | null;
+  zoom: number;
 }
 
 export interface Bucket {

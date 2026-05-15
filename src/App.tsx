@@ -16,6 +16,7 @@ import { BucketBar } from "./components/BucketBar";
 import { BucketsList } from "./components/BucketsList";
 import { FileTree } from "./components/FileTree";
 import { NotesModal } from "./components/NotesModal";
+import { ProjectColorPicker } from "./components/ProjectColorPicker";
 import { QuickSwitcher } from "./components/QuickSwitcher";
 import { RecentProjects } from "./components/RecentProjects";
 import { TerminalsView } from "./components/TerminalsView";
@@ -33,8 +34,19 @@ import {
   pickFolder,
   requestOpenProject,
   setMainProject,
+  setProjectZoom,
 } from "./lib/ipc";
+import { applyPalette, isColorTag, PALETTE } from "./lib/palette";
 import type { Bucket, Project } from "./lib/types";
+
+const ZOOM_MIN = 0.75;
+const ZOOM_MAX = 2.0;
+const ZOOM_STEP = 0.1;
+const ZOOM_PERSIST_MS = 250;
+
+function clampZoom(z: number): number {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 10) / 10));
+}
 
 export const App: Component = () => {
   const [windowLabel, setWindowLabel] = createSignal<string>("main");
@@ -42,10 +54,28 @@ export const App: Component = () => {
   const [recentsKey, setRecentsKey] = createSignal(0);
   const [bucketsKey, setBucketsKey] = createSignal(0);
   const [panelsHidden, setPanelsHidden] = createSignal(false);
+  const [zoom, setZoom] = createSignal(1);
+
+  // Persisted with a small debounce so holding ⌘= or ⌘- doesn't fire a write
+  // per keystroke. Fire-and-forget; if the window closes before the timer
+  // resolves the row still gets written.
+  let zoomPersistTimer: number | undefined;
+  const schedulePersistZoom = (id: number, z: number) => {
+    if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
+    zoomPersistTimer = window.setTimeout(() => {
+      setProjectZoom(id, z).catch((err) =>
+        console.warn("setProjectZoom failed:", err),
+      );
+    }, ZOOM_PERSIST_MS);
+  };
 
   const projectPath = () => currentProject()?.path ?? null;
   const projectId = () => currentProject()?.id ?? null;
   const isMain = () => windowLabel() === "main";
+  const terminalAccent = createMemo<string | null>(() => {
+    const c = currentProject()?.color;
+    return isColorTag(c) ? PALETTE[c].accent : null;
+  });
 
   // Buckets and active bucket id — re-fetch whenever bucketsKey bumps (which
   // happens on every Rust-side bucket mutation, broadcast app-wide).
@@ -106,6 +136,9 @@ export const App: Component = () => {
   let unlistenBuckets: UnlistenFn | undefined;
   let unlistenBucketNext: UnlistenFn | undefined;
   let unlistenBucketPrev: UnlistenFn | undefined;
+  let unlistenZoomIn: UnlistenFn | undefined;
+  let unlistenZoomOut: UnlistenFn | undefined;
+  let unlistenZoomReset: UnlistenFn | undefined;
 
   onMount(async () => {
     let label = "main";
@@ -159,6 +192,42 @@ export const App: Component = () => {
     unlistenBucketPrev = await onMenuEvent("bucket-prev", () => {
       cycleBucket(-1).catch((err) => console.warn("cycleBucket(-1) failed:", err));
     });
+
+    const bumpZoom = (delta: number) => {
+      const p = currentProject();
+      if (!p) return;
+      const next = clampZoom(zoom() + delta);
+      if (next === zoom()) return;
+      setZoom(next);
+      schedulePersistZoom(p.id, next);
+    };
+    unlistenZoomIn = await onMenuEvent("zoom-in", () => bumpZoom(+ZOOM_STEP));
+    unlistenZoomOut = await onMenuEvent("zoom-out", () => bumpZoom(-ZOOM_STEP));
+    unlistenZoomReset = await onMenuEvent("zoom-reset", () => {
+      const p = currentProject();
+      if (!p) return;
+      setZoom(1);
+      schedulePersistZoom(p.id, 1);
+    });
+  });
+
+  // Adopt the loaded project's saved zoom and color whenever currentProject
+  // changes. Both effects also run on initial load.
+  createEffect(() => {
+    const p = currentProject();
+    if (!p) return;
+    const z = typeof p.zoom === "number" && p.zoom > 0 ? p.zoom : 1;
+    setZoom(clampZoom(z));
+  });
+  createEffect(() => {
+    // WebKit `zoom` is a layout-scale (not a transform) so it propagates to
+    // child boxes. The terminal subtree resets `zoom: 1` in CSS to keep
+    // FitAddon reading native pixels; cell size is driven by fontSize.
+    (document.documentElement.style as { zoom?: string }).zoom = String(zoom());
+  });
+  createEffect(() => {
+    const c = currentProject()?.color;
+    applyPalette(isColorTag(c) ? c : null);
   });
 
   // Tell Rust which project main is currently displaying so that other
@@ -176,6 +245,10 @@ export const App: Component = () => {
     unlistenBuckets?.();
     unlistenBucketNext?.();
     unlistenBucketPrev?.();
+    unlistenZoomIn?.();
+    unlistenZoomOut?.();
+    unlistenZoomReset?.();
+    if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
     if (isMain()) {
       void setMainProject(null);
     }
@@ -213,6 +286,14 @@ export const App: Component = () => {
                 <div class="sidebar-pinned-project">
                   <div class="sidebar-pinned-name">{projectName()}</div>
                   <div class="sidebar-pinned-hint">pinned to this window</div>
+                  <Show when={currentProject()}>
+                    {(proj) => (
+                      <ProjectColorPicker
+                        project={proj()}
+                        onChange={(updated) => setCurrentProject(updated)}
+                      />
+                    )}
+                  </Show>
                 </div>
               </Show>
             }
@@ -224,6 +305,14 @@ export const App: Component = () => {
               <div class="sidebar-project-path" title={projectPath() ?? ""}>
                 {projectName()}
               </div>
+              <Show when={currentProject()}>
+                {(proj) => (
+                  <ProjectColorPicker
+                    project={proj()}
+                    onChange={(updated) => setCurrentProject(updated)}
+                  />
+                )}
+              </Show>
             </Show>
           </Show>
         </div>
@@ -268,7 +357,12 @@ export const App: Component = () => {
               <FileTree rootPath={path()} />
             </div>
             <div class="terminal-panel">
-              <TerminalsView cwd={path()} projectPath={path()} />
+              <TerminalsView
+                cwd={path()}
+                projectPath={path()}
+                zoom={zoom}
+                accent={terminalAccent}
+              />
             </div>
           </div>
         )}

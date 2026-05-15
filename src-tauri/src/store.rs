@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS projects (
     path            TEXT NOT NULL UNIQUE,
     name            TEXT NOT NULL,
     last_focused_at TEXT,
-    last_active_at  TEXT
+    last_active_at  TEXT,
+    color           TEXT,
+    zoom            REAL NOT NULL DEFAULT 1.0
 );
 CREATE INDEX IF NOT EXISTS idx_projects_recent
     ON projects(last_active_at DESC, last_focused_at DESC);
@@ -57,6 +59,8 @@ pub struct Project {
     pub name: String,
     pub last_focused_at: Option<String>,
     pub last_active_at: Option<String>,
+    pub color: Option<String>,
+    pub zoom: f64,
 }
 
 pub struct Store {
@@ -77,6 +81,7 @@ impl Store {
         // earlier dev run. CREATE TABLE IF NOT EXISTS is a no-op once the
         // table exists, so new columns must be ALTERed in by hand.
         migrate_notes_columns(&conn)?;
+        migrate_projects_columns(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -111,7 +116,7 @@ impl Store {
         // if they're more than an hour newer (i.e. the user definitely came
         // back to the project but hasn't typed yet).
         let mut stmt = conn.prepare(
-            "SELECT id, path, name, last_focused_at, last_active_at
+            "SELECT id, path, name, last_focused_at, last_active_at, color, zoom
                FROM projects
               ORDER BY MAX(
                   COALESCE(last_active_at, '1970-01-01'),
@@ -135,7 +140,7 @@ impl Store {
     pub fn get_by_id(&self, id: i64) -> Result<Option<Project>> {
         let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
         match conn.query_row(
-            "SELECT id, path, name, last_focused_at, last_active_at
+            "SELECT id, path, name, last_focused_at, last_active_at, color, zoom
                FROM projects WHERE id = ?1",
             params![id],
             project_from_row,
@@ -153,6 +158,36 @@ impl Store {
             params![path],
         )?;
         Ok(())
+    }
+
+    pub fn set_project_color(&self, id: i64, color: Option<&str>) -> Result<Project> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE projects SET color = ?1 WHERE id = ?2",
+            params![color, id],
+        )?;
+        conn.query_row(
+            "SELECT id, path, name, last_focused_at, last_active_at, color, zoom
+               FROM projects WHERE id = ?1",
+            params![id],
+            project_from_row,
+        )
+        .map_err(Into::into)
+    }
+
+    pub fn set_project_zoom(&self, id: i64, zoom: f64) -> Result<Project> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE projects SET zoom = ?1 WHERE id = ?2",
+            params![zoom, id],
+        )?;
+        conn.query_row(
+            "SELECT id, path, name, last_focused_at, last_active_at, color, zoom
+               FROM projects WHERE id = ?1",
+            params![id],
+            project_from_row,
+        )
+        .map_err(Into::into)
     }
 
     // --- buckets -----------------------------------------------------------
@@ -446,6 +481,26 @@ fn migrate_notes_columns(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_projects_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(projects)")?;
+    let column_names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !column_names.iter().any(|n| n == "color") {
+        conn.execute("ALTER TABLE projects ADD COLUMN color TEXT", [])?;
+    }
+    if !column_names.iter().any(|n| n == "zoom") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN zoom REAL NOT NULL DEFAULT 1.0",
+            [],
+        )?;
+        // ALTER ... DEFAULT applies to inserts only; backfill existing rows.
+        conn.execute("UPDATE projects SET zoom = 1.0 WHERE zoom IS NULL", [])?;
+    }
+    Ok(())
+}
+
 fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
     Ok(Note {
         id: row.get(0)?,
@@ -533,7 +588,7 @@ fn load_bucket_projects(
     bucket_id: i64,
 ) -> Result<Vec<Project>> {
     let mut stmt = conn.prepare(
-        "SELECT p.id, p.path, p.name, p.last_focused_at, p.last_active_at
+        "SELECT p.id, p.path, p.name, p.last_focused_at, p.last_active_at, p.color, p.zoom
            FROM bucket_projects bp
            JOIN projects p ON p.id = bp.project_id
           WHERE bp.bucket_id = ?1
@@ -549,7 +604,7 @@ fn load_bucket_projects(
 
 fn select_by_path(conn: &Connection, path: &str) -> Result<Project> {
     conn.query_row(
-        "SELECT id, path, name, last_focused_at, last_active_at
+        "SELECT id, path, name, last_focused_at, last_active_at, color, zoom
            FROM projects WHERE path = ?1",
         params![path],
         project_from_row,
@@ -564,5 +619,7 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         name: row.get(2)?,
         last_focused_at: row.get(3)?,
         last_active_at: row.get(4)?,
+        color: row.get(5)?,
+        zoom: row.get(6)?,
     })
 }

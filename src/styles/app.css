@@ -61,6 +61,7 @@
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: inset 3px 0 0 var(--proj-accent, transparent);
 }
 
 .sidebar-section {
@@ -92,13 +93,13 @@
 }
 
 .sidebar-button.primary {
-  background: #2d5cc8;
+  background: var(--proj-accent, #2d5cc8);
   color: #ffffff;
   font-weight: 500;
 }
 
 .sidebar-button.primary:hover {
-  background: #3469d9;
+  filter: brightness(1.1);
 }
 
 .workspace {
@@ -140,6 +141,10 @@
   gap: 2px;
   overflow-x: auto;
   scrollbar-width: thin;
+  /* Project-color stripe at the very top of the tab strip — visible even in
+     panels-hidden mode, since the terminal panel is always the rightmost
+     (or only) workspace pane. */
+  box-shadow: inset 0 2px 0 var(--proj-accent, transparent);
 }
 
 .terminal-tab {
@@ -219,12 +224,19 @@
   position: absolute;
   inset: 0;
   flex-direction: column;
+  /* Exclude the terminal subtree from the per-project UI zoom: xterm renders
+     to a canvas/WebGL surface, so WebKit's CSS `zoom` would raster-scale and
+     blur the cells, and FitAddon would read scaled pixel dims that don't
+     match the renderer's font size. Cell size is driven instead by
+     term.options.fontSize in TerminalPane. */
+  zoom: 1;
 }
 
 .terminal-host .xterm {
   flex: 1;
   min-height: 0;
   padding: 8px;
+  zoom: 1;
 }
 
 .bucket-bar {
@@ -262,7 +274,7 @@
 }
 
 .bucket-bar-current {
-  color: #2d5cc8;
+  color: var(--proj-accent, #2d5cc8);
   font-weight: 500;
 }
 
@@ -430,7 +442,7 @@
 }
 
 .bucket-project.at-cursor {
-  color: #2d5cc8;
+  color: var(--proj-accent, #2d5cc8);
   font-weight: 600;
 }
 
@@ -522,12 +534,12 @@
 }
 
 .recent-item.active {
-  background: #2d5cc8;
+  background: var(--proj-accent, #2d5cc8);
   color: #ffffff;
 }
 
 .recent-item.active:hover {
-  background: #3469d9;
+  filter: brightness(1.1);
 }
 
 .recent-name {
@@ -563,6 +575,44 @@
   font-size: 10px;
   color: #5e5e66;
   font-style: italic;
+}
+
+.sidebar-pinned-name::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--proj-accent, transparent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.color-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  padding: 0;
+  background-clip: padding-box;
+  transition: transform 80ms ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.color-swatch.selected {
+  border-color: #e8e8ea;
+  box-shadow: 0 0 0 2px #131316, 0 0 0 3px var(--proj-accent, transparent);
 }
 
 .switcher-overlay {
@@ -613,7 +663,7 @@
 }
 
 .switcher-item.highlighted {
-  background: #2d5cc8;
+  background: var(--proj-accent, #2d5cc8);
   color: #ffffff;
 }
 

@@ -7,6 +7,7 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
+import type { Accessor } from "solid-js";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
@@ -24,6 +25,8 @@ const newTabId = () => `tab-${++tabCounter}`;
 export interface TerminalsViewProps {
   cwd: string;
   projectPath: string;
+  zoom?: Accessor<number>;
+  accent?: Accessor<string | null>;
 }
 
 export const TerminalsView: Component<TerminalsViewProps> = (props) => {
@@ -195,6 +198,8 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
                 cwd={tab.cwd}
                 onReady={(h) => handles.set(tab.id, h)}
                 onActivity={markActivityForCurrent}
+                zoom={props.zoom}
+                accent={props.accent}
               />
             </div>
           )}

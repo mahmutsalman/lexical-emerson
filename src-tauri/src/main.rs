@@ -48,6 +48,8 @@ fn main() {
             commands::request_open_project,
             commands::current_window_label,
             commands::set_main_project,
+            commands::set_project_color,
+            commands::set_project_zoom,
             commands::list_buckets,
             commands::create_bucket,
             commands::delete_bucket,
@@ -98,6 +100,9 @@ fn main() {
                 "bucket_prev" => "menu://bucket-prev",
                 "bucket_new" => "menu://bucket-new",
                 "notes_open" => "menu://notes-open",
+                "zoom_in" => "menu://zoom-in",
+                "zoom_out" => "menu://zoom-out",
+                "zoom_reset" => "menu://zoom-reset",
                 _ => return,
             };
             // Route menu events to the focused window only — broadcasting
@@ -176,7 +181,21 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .item(&terminal_prev)
         .build()?;
 
+    let zoom_in = MenuItemBuilder::with_id("zoom_in", "Zoom In")
+        .accelerator("CmdOrCtrl+=")
+        .build(app)?;
+    let zoom_out = MenuItemBuilder::with_id("zoom_out", "Zoom Out")
+        .accelerator("CmdOrCtrl+-")
+        .build(app)?;
+    let zoom_reset = MenuItemBuilder::with_id("zoom_reset", "Actual Size")
+        .accelerator("CmdOrCtrl+0")
+        .build(app)?;
+
     let view_submenu = SubmenuBuilder::new(app, "View")
+        .item(&zoom_in)
+        .item(&zoom_out)
+        .item(&zoom_reset)
+        .separator()
         .fullscreen()
         .build()?;
 

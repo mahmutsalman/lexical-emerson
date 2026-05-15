@@ -1,4 +1,5 @@
-import { Component, onCleanup, onMount } from "solid-js";
+import { Component, createEffect, onCleanup, onMount } from "solid-js";
+import type { Accessor } from "solid-js";
 
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -25,6 +26,21 @@ export interface TerminalPaneProps {
   cwd: string;
   onReady?: (handle: TerminalHandle) => void;
   onActivity?: () => void;
+  zoom?: Accessor<number>;
+  accent?: Accessor<string | null>;
+}
+
+const BASE_FONT_SIZE = 13;
+const DEFAULT_CURSOR = "#e8e8ea";
+const DEFAULT_SELECTION = "#2d5cc8";
+
+function buildTheme(accent: string | null) {
+  return {
+    background: "#0e0e10",
+    foreground: "#e8e8ea",
+    cursor: accent ?? DEFAULT_CURSOR,
+    selectionBackground: accent ?? DEFAULT_SELECTION,
+  };
 }
 
 export const TerminalPane: Component<TerminalPaneProps> = (props) => {
@@ -36,22 +52,20 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
   let unlistenExit: UnlistenFn | undefined;
   let resizeObserver: ResizeObserver | undefined;
   let resizeTimer: number | undefined;
+  let zoomRefitTimer: number | undefined;
   let disposed = false;
 
   onMount(async () => {
+    const initialZoom = props.zoom?.() ?? 1;
+    const initialAccent = props.accent?.() ?? null;
     term = new Terminal({
       fontFamily: '"SF Mono", "Menlo", "Monaco", monospace',
-      fontSize: 13,
+      fontSize: Math.max(8, Math.round(BASE_FONT_SIZE * initialZoom)),
       lineHeight: 1.15,
       cursorBlink: true,
       cursorStyle: "block",
       scrollback: 5000,
-      theme: {
-        background: "#0e0e10",
-        foreground: "#e8e8ea",
-        cursor: "#e8e8ea",
-        selectionBackground: "#2d5cc8",
-      },
+      theme: buildTheme(initialAccent),
       allowProposedApi: true,
     });
 
@@ -137,9 +151,43 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
     term.focus();
   });
 
+  // Update xterm theme (cursor + selection bg) when the project's accent
+  // changes. Reassigning options.theme triggers a redraw without disposing
+  // the renderer.
+  createEffect(() => {
+    const accent = props.accent?.() ?? null;
+    if (!term) return;
+    term.options.theme = buildTheme(accent);
+  });
+
+  // Zoom signal subscription: change xterm fontSize, then debounce-refit so
+  // FitAddon recomputes cols/rows for the new cell metrics. The terminal
+  // subtree is excluded from WebKit's `zoom` (see app.css) so this is the
+  // only path that drives the canvas size.
+  createEffect(() => {
+    const z = props.zoom?.() ?? 1;
+    if (!term || !fitAddon) return;
+    const nextSize = Math.max(8, Math.round(BASE_FONT_SIZE * z));
+    if (term.options.fontSize === nextSize) return;
+    term.options.fontSize = nextSize;
+    if (zoomRefitTimer !== undefined) clearTimeout(zoomRefitTimer);
+    zoomRefitTimer = window.setTimeout(() => {
+      if (!term || !fitAddon) return;
+      try {
+        fitAddon.fit();
+        if (sessionId) {
+          resizeTerminal(sessionId, term.cols, term.rows).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("zoom refit failed:", err);
+      }
+    }, 60);
+  });
+
   onCleanup(() => {
     disposed = true;
     if (resizeTimer !== undefined) clearTimeout(resizeTimer);
+    if (zoomRefitTimer !== undefined) clearTimeout(zoomRefitTimer);
     resizeObserver?.disconnect();
     unlistenData?.();
     unlistenExit?.();

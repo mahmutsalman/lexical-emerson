@@ -88,6 +88,20 @@ export async function markFocused(path: string): Promise<void> {
   await invoke("mark_focused", { path });
 }
 
+export async function setProjectColor(
+  id: number,
+  color: string | null,
+): Promise<Project> {
+  return await invoke<Project>("set_project_color", { id, color });
+}
+
+export async function setProjectZoom(
+  id: number,
+  zoom: number,
+): Promise<Project> {
+  return await invoke<Project>("set_project_zoom", { id, zoom });
+}
+
 export async function requestOpenProject(path: string): Promise<Project> {
   return await invoke<Project>("request_open_project", { path });
 }
@@ -214,7 +228,10 @@ export async function onMenuEvent(
     | "bucket-next"
     | "bucket-prev"
     | "bucket-new"
-    | "notes-open",
+    | "notes-open"
+    | "zoom-in"
+    | "zoom-out"
+    | "zoom-reset",
   cb: () => void,
 ): Promise<UnlistenFn> {
   // Scope to the current webview window. The Rust side emits with
