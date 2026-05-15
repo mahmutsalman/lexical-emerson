@@ -6,39 +6,44 @@ A lightweight macOS folder + terminal launcher for developers who use Claude Cod
 
 ## Why
 
-VS Code costs ~500 MB of RAM per window. If you juggle 20 projects a week, that's a 10 GB ceiling before language servers. Lexical Emerson targets ~70–80 MB per window — a **~5–10× win** — by deliberately not being an editor. Your editor is `claude` running inside the terminal.
+VS Code costs ~500 MB of RAM per window. If you juggle 20 projects a week, that's a 10 GB ceiling before language servers even open a file. Lexical Emerson targets **~70–80 MB per window — a ~5–10× win** — by deliberately not being an editor. Your editor is `claude` running inside the terminal.
 
-## Status
+| Scenario | Lexical Emerson (target) | VS Code (typical) |
+|---|---|---|
+| 1 window | ≤ 100 MB | ~500 MB |
+| 5 windows (typical active workload) | ≤ 400 MB | ~2.5 GB |
+| 20 windows | ≤ 1.5 GB | ~10 GB+ |
 
-**v0.1 in development.** macOS only.
+## Features (v0.1)
 
-See [`docs/plan.md`](docs/plan.md) for the milestone-sliced roadmap.
+- **File tree** per project window — lazy children, no FS watcher overhead.
+- **PTY-backed terminal** with multiple tabs per window — `claude`, `vim`, `htop`, anything works exactly as in Terminal.app.
+- **Multi-window** — one project per macOS window, each with its own state, file tree, and terminals. macOS's WindowServer handles Cmd-` cycling for free.
+- **Smart-sorted Recent Projects** sidebar — last 20, ranked by `max(last_active_at, last_focused_at - 1h)` so the project you're actually typing in beats one you just alt-tabbed past.
+- **Cmd+P switcher** — fuzzy-search across every known project. Enter opens (or focuses).
+- **Buckets — the killer feature** — group your 3–5 active projects into a named bucket, then jump between their windows with one keystroke (`⌘J` forward, `⌘⇧J` back). Persists across app restarts.
+- **Per-project terminal persistence** — switch projects via Recent and your old terminals stay alive in the background; switch back and the cursor and scrollback are right where you left them.
 
-## Features
+## Keyboard shortcuts
 
-### v0.1 (in progress)
+| Action | Shortcut |
+|---|---|
+| Quick Switcher (fuzzy project search) | `⌘P` |
+| New terminal tab (in focused window) | `⌘T` |
+| Close current terminal tab | `⌘W` |
+| Next / previous terminal tab | `⌘⇧]` / `⌘⇧[` |
+| Cycle bucket forward / backward | `⌘J` / `⌘⇧J` |
+| New bucket | `⌘⇧B` |
 
-- **File tree** per project window — lazy, fast, no FS watcher overhead.
-- **PTY-backed terminal** in every window — `claude`, `vim`, `htop`, anything runs the way you'd expect.
-- **Recent projects** sidebar — last 20, smart-sorted by where you've actually been working (window focus + keystroke activity), not where you most recently clicked.
-- **Cmd+P switcher** — fuzzy-search any known project, jump in one keystroke.
-- **Buckets** — group your 3–5 active projects, cycle through them with `Cmd+Shift+]` regardless of how many other windows are open. The killer feature.
+All shortcuts are app-scoped — they fire only when Lexical Emerson is the frontmost app, and only in the focused window (so `⌘T` doesn't open a tab in every window at once).
 
-### v0.2+ (planned)
+## Install (v0.1, ad-hoc-signed)
 
-- Cross-platform (Linux, Windows).
-- Per-project shell override.
-- "Last modified" sort signal in addition to "last worked in".
+Download `Lexical-Emerson-0.1.0.app.zip` from the Releases page, unzip, drag `Lexical Emerson.app` to `/Applications`.
 
-## Tech
+**First launch:** macOS Gatekeeper will block the app because v0.1 isn't notarized. Right-click the app icon → **Open** → confirm. After this, it launches normally.
 
-- [Tauri v2](https://v2.tauri.app) + Rust backend
-- [Solid.js](https://solidjs.com) frontend (no React)
-- [xterm.js](https://xtermjs.org) terminal renderer
-- [`portable-pty`](https://docs.rs/portable-pty) Rust PTY crate
-- [rusqlite](https://docs.rs/rusqlite) state store, WAL mode
-
-See [`docs/ADRs/`](docs/ADRs/) for why each was chosen.
+(Notarization is on the roadmap; for now it's a personal-use tool and the Gatekeeper bypass is a one-time tap.)
 
 ## Build from source
 
@@ -46,26 +51,27 @@ Requires Node ≥ 20, Rust ≥ 1.80, and the Tauri CLI prereqs (Xcode CLT on mac
 
 ```bash
 npm install
-npm run tauri dev
+npm run tauri dev          # dev with HMR
+npm run tauri build        # release .app at src-tauri/target/release/bundle/macos/
 ```
 
-For a release build:
+## Tech
 
-```bash
-npm run tauri build
-```
+- [Tauri v2](https://v2.tauri.app) + Rust backend
+- [Solid.js](https://solidjs.com) + TypeScript frontend (no React)
+- [xterm.js](https://xtermjs.org) terminal renderer with WebGL addon
+- [`portable-pty`](https://docs.rs/portable-pty) Rust PTY crate
+- [rusqlite](https://docs.rs/rusqlite) state store, WAL mode
 
-The notarized `.dmg` lands in `src-tauri/target/release/bundle/dmg/`.
+See [`docs/ADRs/`](docs/ADRs/) for why each was chosen.
 
-## RAM expectations (target)
+## Roadmap
 
-| Scenario | Target idle RAM |
-|---|---|
-| 1 window | ≤ 100 MB |
-| 5 windows (typical active workload) | ≤ 400 MB |
-| 20 windows | ≤ 1.5 GB |
-
-For comparison: VS Code with 5 projects = ~2.5 GB before language servers.
+| | Status | What's in it |
+|---|---|---|
+| **v0.1** | shipping | All features above, ad-hoc-signed |
+| v0.1.1 | next | Apple notarization + DMG + GitHub Releases pipeline |
+| v0.2 | planned | Linux + Windows builds, per-project shell override, "last modified" as a smart-sort signal, dotfile visibility toggle (`Cmd+.`) |
 
 ## License
 

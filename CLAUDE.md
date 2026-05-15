@@ -8,7 +8,7 @@ A **lightweight macOS folder + terminal launcher** for developers who use Claude
 
 ## Killer features (in priority order)
 
-1. **Buckets** — user groups 3–5 active projects and cycles through them with `Cmd+Shift+]`. This is the differentiator vs VS Code's Cmd-` window cycling.
+1. **Buckets** — user groups 3–5 active projects and cycles through them with `⌘J` / `⌘⇧J`. This is the differentiator vs VS Code's Cmd-` window cycling.
 2. **PTY-backed terminal** per window — `claude` runs inside it.
 3. **Smart-sorted recent projects** — sort by window focus + PTY-keystroke activity, not raw click recency.
 
@@ -20,7 +20,7 @@ A **lightweight macOS folder + terminal launcher** for developers who use Claude
 
 ## Methodology
 
-**Adaptive Project Execution is active for this project.** See `~/.claude/projects/-Users-mahmutsalman-.../memory/methodology-active.md`.
+**Adaptive Project Execution is active for this project.** See `~/.claude/projects/-Users-mahmutsalman-Documents-MyCodingProjects-Projects-EfficiencApps3-lexical-emerson/memory/methodology-active.md`.
 
 Working surfaces:
 - `docs/plan.md` — vision + milestone slices (rolling-wave)
