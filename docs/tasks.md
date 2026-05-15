@@ -1,38 +1,37 @@
-# Tasks — Current Slice (M1)
+# Tasks — Current Slice (M2)
 
 > Regenerated each milestone from `plan.md` + recent ADRs. Do not edit by hand long-term — rewrite at slice boundaries.
 
-## Slice: M1 — Skeleton window with working terminal
+## Slice: M2 — Persistence + recent projects + multi-terminal tabs
 
-**Exit criterion**: `claude` runs inside the PTY-backed terminal, file tree browses the picked folder.
+**Exit criteria** (all must hit):
+
+1. Reopen Lexical Emerson after quit → last project's path restores.
+2. Recent Projects sidebar shows up to 20 entries, sorted by smart-sort (`max(last_active_at, last_focused_at - 1h)`), clickable.
+3. Native macOS menu bar has a "Terminal" entry with "New Terminal" (Cmd+T), "Close Terminal" (Cmd+W), "Next/Prev Terminal" (Cmd+Shift+]/[).
+4. Inside the terminal panel: tab strip on top showing all open terminals, click to switch, x to close, + to add.
+5. Each terminal's scrollback survives switching tabs (xterm instance stays alive).
 
 ### Tasks
 
-- [x] Scaffold methodology + docs (this file)
-- [x] Write 4 ADRs (Tauri v2, Solid, rusqlite, multi-window)
-- [x] Create repo basics: LICENSE, .gitignore, README, CLAUDE.md
-- [x] Write Tauri v2 + Solid + TS skeleton (package.json, vite.config, tsconfig, index.html, tauri.conf.json, Cargo.toml)
-- [x] Write `src-tauri/entitlements.plist` with `allow-unsigned-executable-memory`
-- [x] Implement PTY backend (`src-tauri/src/pty.rs`)
-- [x] Implement file-tree + projects commands (`src-tauri/src/commands.rs`, `projects.rs`)
-- [x] Implement Solid frontend (`App.tsx`, `FileTree.tsx`, `TerminalPane.tsx`, `ipc.ts`)
-- [x] `npm install` (78 packages clean), `npx tsc --noEmit` clean, `cargo check` clean
-- [x] Generate placeholder icons via `npx tauri icon`
-- [x] `npm run build` produces dist/ successfully
-- [ ] `cargo tauri dev` — launch the actual window (first-time compile ~3–5 min)
-- [ ] Smoke test: pick a folder, expand a directory in the tree, run `claude --version` in the terminal
-- [ ] First `/checkpoint` to capture M1 completion handoff
+- [x] Update `plan.md` + write `ADR-0005-terminal-tabs-within-project-window.md`
+- [ ] Backend: add `rusqlite` (bundled, WAL) to `Cargo.toml`
+- [ ] Backend: `src-tauri/src/store.rs` — schema, migrations, queries
+- [ ] Backend: `src-tauri/src/projects.rs` — `Project` struct, store integration
+- [ ] Backend: Tauri commands `list_recents`, `mark_focused`, `mark_active`, `register_project`
+- [ ] Backend: native macOS menu in `main.rs` (`tauri::menu::Menu`) + `on_menu_event` forwarder
+- [ ] Frontend: `RecentProjects.tsx` — renders sidebar list, polls or invalidates on switch
+- [ ] Frontend: `TerminalsView.tsx` — tab strip + N TerminalPane instances + display:none for inactive
+- [ ] Frontend: extract TerminalPane to accept `terminalId` + `cwd` props; lifecycle keyed by id
+- [ ] Frontend: listen for `menu://new-terminal`, `menu://close-terminal`, `menu://cycle-terminal`
+- [ ] Frontend: 30s-debounced `mark_active` call from TerminalPane on `onData` activity
+- [ ] Verify: `cargo check` clean, `tsc --noEmit` clean
+- [ ] Manual test: hit all 5 exit criteria from a fresh quit
 
 ### Definition of done
 
-- A single Tauri window opens.
-- Native folder picker works.
-- File tree shows the picked folder's first-level contents with expandable directories.
-- Terminal renders `$SHELL` (zsh on Mahmut's machine) with a working prompt.
-- Resize the window → terminal reflows correctly.
-- Ctrl+C in the terminal kills the running command but keeps the shell.
-- Close the window → no leaked Rust threads (`ps` after close shows clean state).
+All 5 exit criteria hit, dev test passes, no warnings in console. After this lands, commit "M2 — persistence + recent + multi-terminal tabs" and update `docs/STATUS.md`.
 
-### After M1: what comes next
+### After M2: what comes next
 
-M2 — rusqlite store + recent projects sidebar. Pre-decision: schema lives in `src-tauri/src/store.rs` with `PRAGMA journal_mode=WAL` from day one.
+M3 — multi-window + Cmd+P switcher. Pre-decision: the SQLite schema in M2 already supports multiple open windows (one window = one project, but `last_focused_at` is per-project not per-window — fine). M3 adds `WindowId → ProjectId` mapping in Rust AppState and the Cmd+P fuzzy modal in Solid.

@@ -1,22 +1,44 @@
-import { Component, createSignal, Show } from "solid-js";
+import { Component, createSignal, onMount, Show } from "solid-js";
 
 import { FileTree } from "./components/FileTree";
-import { TerminalPane } from "./components/TerminalPane";
-import { pickFolder } from "./lib/ipc";
+import { RecentProjects } from "./components/RecentProjects";
+import { TerminalsView } from "./components/TerminalsView";
+import { lastProject, openProject, pickFolder } from "./lib/ipc";
 
 export const App: Component = () => {
   const [projectPath, setProjectPath] = createSignal<string | null>(null);
+  const [recentsKey, setRecentsKey] = createSignal(0);
+
+  const switchTo = async (path: string) => {
+    try {
+      await openProject(path);
+      setProjectPath(path);
+      setRecentsKey((v) => v + 1);
+    } catch (err) {
+      console.error("openProject failed:", err);
+    }
+  };
 
   const openFolder = async () => {
     try {
       const picked = await pickFolder();
-      if (picked) {
-        setProjectPath(picked);
-      }
+      if (picked) await switchTo(picked);
     } catch (err) {
       console.error("pick_folder failed:", err);
     }
   };
+
+  onMount(async () => {
+    try {
+      const last = await lastProject();
+      if (last) {
+        setProjectPath(last.path);
+        setRecentsKey((v) => v + 1);
+      }
+    } catch (err) {
+      console.error("lastProject failed:", err);
+    }
+  });
 
   const projectName = () => {
     const p = projectPath();
@@ -34,15 +56,7 @@ export const App: Component = () => {
             {projectPath() ? "Switch folder…" : "Open folder…"}
           </button>
           <Show when={projectPath()}>
-            <div
-              style={{
-                "margin-top": "10px",
-                "font-size": "11px",
-                color: "#7a7a82",
-                "word-break": "break-all",
-              }}
-              title={projectPath() ?? ""}
-            >
+            <div class="sidebar-project-path" title={projectPath() ?? ""}>
               {projectName()}
             </div>
           </Show>
@@ -50,22 +64,21 @@ export const App: Component = () => {
 
         <div class="sidebar-section">
           <div class="sidebar-section-title">Recent</div>
-          <div style={{ "font-size": "11px", color: "#5e5e66" }}>
-            (M2 — persistence)
-          </div>
+          <RecentProjects
+            refreshKey={recentsKey()}
+            activePath={projectPath()}
+            onPick={(path) => switchTo(path)}
+          />
         </div>
 
         <div class="sidebar-section">
           <div class="sidebar-section-title">Buckets</div>
-          <div style={{ "font-size": "11px", color: "#5e5e66" }}>
-            (M4 — the killer feature)
-          </div>
+          <div class="sidebar-placeholder">(M4 — the killer feature)</div>
         </div>
       </aside>
 
       <Show
         when={projectPath()}
-        keyed
         fallback={
           <div class="workspace" style={{ "grid-template-columns": "1fr" }}>
             <div class="empty-state">
@@ -80,17 +93,17 @@ export const App: Component = () => {
         {(path) => (
           <div class="workspace">
             <div class="file-tree-panel">
-              <FileTree rootPath={path} />
+              <FileTree rootPath={path()} />
             </div>
             <div class="terminal-panel">
-              <TerminalPane cwd={path} />
+              <TerminalsView cwd={path()} projectPath={path()} />
             </div>
           </div>
         )}
       </Show>
 
       <footer class="bucket-bar">
-        <span>Lexical Emerson v0.1 — M1 (skeleton)</span>
+        <span>Lexical Emerson v0.1 — M2 (persistence + multi-terminal)</span>
       </footer>
     </div>
   );

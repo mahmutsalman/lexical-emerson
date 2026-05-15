@@ -25,6 +25,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [features]
 default = ["custom-protocol"]

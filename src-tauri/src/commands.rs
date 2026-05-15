@@ -3,6 +3,8 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
+use crate::projects::folder_basename;
+use crate::store::Project;
 use crate::AppState;
 
 #[derive(Serialize)]
@@ -115,4 +117,30 @@ pub fn close_terminal(state: State<AppState>, session_id: String) -> Result<(), 
         .map_err(|e| e.to_string())?
         .close(&session_id)
         .map_err(|e| e.to_string())
+}
+
+// --- project persistence ---------------------------------------------------
+
+#[tauri::command]
+pub fn open_project(state: State<AppState>, path: String) -> Result<Project, String> {
+    let name = folder_basename(&path);
+    state
+        .store
+        .register_or_focus(&path, &name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_recents(state: State<AppState>) -> Result<Vec<Project>, String> {
+    state.store.list_recents(20).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn mark_active(state: State<AppState>, path: String) -> Result<(), String> {
+    state.store.mark_active(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn last_project(state: State<AppState>) -> Result<Option<Project>, String> {
+    state.store.last_project().map_err(|e| e.to_string())
 }

@@ -17,8 +17,14 @@ import {
   writeTerminal,
 } from "../lib/ipc";
 
+export interface TerminalHandle {
+  focus: () => void;
+}
+
 export interface TerminalPaneProps {
   cwd: string;
+  onReady?: (handle: TerminalHandle) => void;
+  onActivity?: () => void;
 }
 
 export const TerminalPane: Component<TerminalPaneProps> = (props) => {
@@ -101,6 +107,11 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
       writeTerminal(activeId, bytesToBase64(bytes)).catch((err) => {
         console.error("write_terminal failed:", err);
       });
+      props.onActivity?.();
+    });
+
+    props.onReady?.({
+      focus: () => term?.focus(),
     });
 
     // Debounced resize via ResizeObserver on the container.

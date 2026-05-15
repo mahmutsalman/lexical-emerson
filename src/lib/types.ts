@@ -14,3 +14,11 @@ export interface PtyExitEvent {
   session_id: string;
   exit_code: number;
 }
+
+export interface Project {
+  id: number;
+  path: string;
+  name: string;
+  last_focused_at: string | null;
+  last_active_at: string | null;
+}

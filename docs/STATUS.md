@@ -4,22 +4,26 @@
 
 ## Current slice
 
-**M1 — Skeleton window with working terminal.**
+**M2 — Persistence + recent projects + multi-terminal tabs.**
 
 ## Where we are
 
-Day 1 scaffold complete. Methodology + docs + Tauri v2 + Solid + TS skeleton + M1 code all written. **`npx tsc --noEmit` and `cargo check` both pass cleanly with zero warnings.** Frontend build emits a 414 KB JS bundle (107 KB gzipped). Icons generated via `npx tauri icon` from a placeholder source PNG.
+M1 shipped: window, file tree, single terminal, `<Show keyed>` fix for switching projects, first commit `3400063`.
 
-The skeleton is structurally complete. The next milestone-defining act is launching `cargo tauri dev`, picking a folder, and confirming `claude` runs inside the terminal.
+M2 structurally complete: rusqlite WAL store, `Project` schema with `last_focused_at` / `last_active_at`, smart-sort query (`MAX(last_active, last_focused - 1h)`), Tauri commands (`open_project`, `list_recents`, `mark_active`, `last_project`), native macOS menu with `Terminal` submenu (`Cmd+T` New, `Cmd+W` Close, `Cmd+Shift+]/[` cycle), `TerminalsView` component with tab strip + N TerminalPane instances + `display:none` for inactive tabs, `RecentProjects` sidebar component, App.tsx auto-restores `lastProject()` on launch and refreshes recents on every switch.
 
-## Next concrete step
+`cargo check` and `npx tsc --noEmit` both clean. The running dev server already rebuilt the binary.
 
-1. `cargo tauri dev` — launches Vite + the Tauri window. First run will compile all dependencies (~3–5 min).
-2. Click "Open folder…" in the sidebar, pick any real project folder.
-3. Confirm: file tree populates with first-level entries, expanding a directory shows its children.
-4. Confirm: terminal pane shows a prompt at the picked folder's cwd. Run `claude --version`. Type, edit-line, Ctrl+C, hit return — everything should behave like Terminal.app.
-5. If all green: M1 is done. Run `/checkpoint` to record real completion (this STATUS only covers the scaffold day).
-6. If anything is wrong: fix, re-run, iterate.
+## Next concrete step (user-facing)
+
+Smoke-test the M2 exit criteria in the running app window:
+
+1. **Native menu**: top of screen should show **Lexical Emerson | File | Edit | View | Terminal | Window** — verify Terminal menu has New Terminal (⌘T), Close Terminal (⌘W), Next/Previous Terminal (⌘⇧]/[).
+2. **Multi-terminal tabs**: pick a folder, then ⌘T a few times — terminal panel grows tabs. Click each to switch; scrollback survives. `+` button adds a tab; `×` on a tab closes it (last one auto-keeps one open).
+3. **Recent projects**: switch between 2–3 folders. The Recent section in the sidebar should populate, sorted by smart-sort. The active project is highlighted blue.
+4. **Persistence**: ⌘Q the app. Relaunch (`cargo tauri dev` or just open the running window again). The last project should auto-restore.
+
+If all four hit: M2 done. Commit and move to M3 (multi-window + Cmd+P switcher).
 
 ## Recent decisions (last 3)
 

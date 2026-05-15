@@ -29,7 +29,7 @@ Not an IDE in the Monaco/LSP sense. The terminal is the editor (because Claude C
 | # | Milestone | Exit criterion | Estimate |
 |---|---|---|---|
 | **M1** | Skeleton window with working terminal | `claude` works inside the PTY, file tree browseable | 2–3 days |
-| **M2** | Persistence + recent projects | Quit + reopen restores; recent list smart-sorted | 1–2 days |
+| **M2** | Persistence + recent projects + **multi-terminal tabs** | Recent list smart-sorted; multiple terminals per window via a tab strip; macOS menu has Terminal submenu with Cmd+T | 2–3 days |
 | **M3** | Multi-window + Cmd+P switcher | 5 windows simultaneously, Cmd+P jumps between any | 2 days |
 | **M4** | Buckets (the killer feature) | `Cmd+Shift+]` cycles bucket ring; persists cursor | 2–3 days |
 | **M5** | Polish, sign, notarize, release | DMG installs on clean Mac, no Gatekeeper warning | 1–2 days |
@@ -38,9 +38,11 @@ Each milestone is **independently usable**. Stop after any one and still have a 
 
 ## Active slice
 
-**Current: M1 — Skeleton window with working terminal.**
+**Current: M2 — Persistence + recent projects + multi-terminal tabs.**
 
-See `docs/tasks.md` for M1's working tasks.
+See `docs/tasks.md` for M2's working tasks.
+
+M1 is complete: `cargo tauri dev` launches a window, file tree populates from a picked folder, PTY shell runs `claude` correctly, the `<Show keyed>` fix re-spawns the PTY when the project switches.
 
 ## Architectural decisions
 
@@ -48,7 +50,8 @@ See `docs/ADRs/` for the load-bearing choices:
 - ADR-0001 — Tauri v2 over Electron
 - ADR-0002 — Solid.js over React
 - ADR-0003 — rusqlite (SQLite) over a JSON file for state
-- ADR-0004 — Separate windows over a tabbed UI
+- ADR-0004 — Separate windows over a tabbed UI (project-level)
+- ADR-0005 — Terminal tabs *within* a project window (terminal-level)
 
 ## Predicted gotchas (mitigations baked into M1)
 
@@ -62,7 +65,7 @@ See `docs/ADRs/` for the load-bearing choices:
 - Per-project shell override (currently uses `$SHELL`, falls back to `/bin/zsh`).
 - "Last modified mtime" sort as an additional signal (currently smart-sort uses focus + PTY-stdin only).
 - Dotfile visibility toggle (`Cmd+.`).
-- Multi-pane terminal split inside one project window.
+- Split-pane terminals (two terminals side by side in one project window — different from M2's stacked tabs).
 
 ## References
 

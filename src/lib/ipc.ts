@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import type { DirEntry, PtyDataEvent, PtyExitEvent } from "./types";
+import type { DirEntry, Project, PtyDataEvent, PtyExitEvent } from "./types";
 
 export async function pickFolder(): Promise<string | null> {
   return await invoke<string | null>("pick_folder");
@@ -51,6 +51,33 @@ export async function onPtyExit(
   cb: (e: PtyExitEvent) => void,
 ): Promise<UnlistenFn> {
   return await listen<PtyExitEvent>("pty://exit", (event) => cb(event.payload));
+}
+
+// --- project persistence ---------------------------------------------------
+
+export async function openProject(path: string): Promise<Project> {
+  return await invoke<Project>("open_project", { path });
+}
+
+export async function listRecents(): Promise<Project[]> {
+  return await invoke<Project[]>("list_recents");
+}
+
+export async function markActive(path: string): Promise<void> {
+  await invoke("mark_active", { path });
+}
+
+export async function lastProject(): Promise<Project | null> {
+  return await invoke<Project | null>("last_project");
+}
+
+// --- menu events -----------------------------------------------------------
+
+export async function onMenuEvent(
+  id: "terminal-new" | "terminal-close" | "terminal-next" | "terminal-prev",
+  cb: () => void,
+): Promise<UnlistenFn> {
+  return await listen<void>(`menu://${id}`, () => cb());
 }
 
 // --- base64 helpers --------------------------------------------------------
