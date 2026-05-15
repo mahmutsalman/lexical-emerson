@@ -5,6 +5,8 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type {
   Bucket,
   DirEntry,
+  Note,
+  NoteSummary,
   Project,
   PtyDataEvent,
   PtyExitEvent,
@@ -94,6 +96,13 @@ export async function currentWindowLabel(): Promise<string> {
   return await invoke<string>("current_window_label");
 }
 
+// Tells Rust which project the MAIN launcher window is currently showing
+// (null = no project). Used by spawn_or_focus_project_window so we never
+// open the same project in two windows.
+export async function setMainProject(projectId: number | null): Promise<void> {
+  await invoke("set_main_project", { projectId });
+}
+
 // --- buckets ---------------------------------------------------------------
 
 export async function listBuckets(): Promise<Bucket[]> {
@@ -142,6 +151,57 @@ export async function onBucketsChanged(cb: () => void): Promise<UnlistenFn> {
   return await listen<void>("buckets://changed", () => cb());
 }
 
+// --- notes -----------------------------------------------------------------
+
+export async function listNotes(projectId: number): Promise<NoteSummary[]> {
+  return await invoke<NoteSummary[]>("list_notes", { projectId });
+}
+
+export async function getNote(id: number): Promise<Note> {
+  return await invoke<Note>("get_note", { id });
+}
+
+export async function createNote(projectId: number): Promise<Note> {
+  return await invoke<Note>("create_note", { projectId });
+}
+
+export async function updateNote(
+  id: number,
+  contentJson: string,
+): Promise<NoteSummary> {
+  return await invoke<NoteSummary>("update_note", { id, contentJson });
+}
+
+export async function deleteNote(id: number): Promise<void> {
+  await invoke("delete_note", { id });
+}
+
+export async function setNoteTitle(
+  id: number,
+  userTitle: string | null,
+): Promise<NoteSummary> {
+  return await invoke<NoteSummary>("set_note_title", { id, userTitle });
+}
+
+export async function saveNoteImage(
+  projectId: number,
+  dataBase64: string,
+  ext: string,
+): Promise<string> {
+  return await invoke<string>("save_note_image", {
+    projectId,
+    dataBase64,
+    ext,
+  });
+}
+
+export async function resolveNoteImage(
+  projectId: number,
+  relPath: string,
+): Promise<string> {
+  return await invoke<string>("resolve_note_image", { projectId, relPath });
+}
+
 // --- menu events -----------------------------------------------------------
 
 export async function onMenuEvent(
@@ -153,7 +213,8 @@ export async function onMenuEvent(
     | "quick-switcher"
     | "bucket-next"
     | "bucket-prev"
-    | "bucket-new",
+    | "bucket-new"
+    | "notes-open",
   cb: () => void,
 ): Promise<UnlistenFn> {
   // Scope to the current webview window. The Rust side emits with

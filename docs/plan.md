@@ -33,14 +33,15 @@ Not an IDE in the Monaco/LSP sense. The terminal is the editor (because Claude C
 | **M3** | Multi-window + Cmd+P switcher | "Open in new window" via Recent/Cmd+P, focused-window-only menu events, de-dup so at most one window per project | 2 days |
 | **M4** | Buckets (the killer feature) | `Cmd+J` cycles bucket ring across windows; persists cursor; sidebar bucket management | 2–3 days |
 | **M5** | Polish + ad-hoc-signed release build | Release `.app` launches outside dev, all M1-M4 features work, GitHub push deferred | 1 day |
+| **M6** | Per-project notes (Quill + image paste) | `Cmd+Shift+N` opens a per-project notes modal with rich text + clipboard-image-paste + captions, persisted in SQLite | 1 day |
 
 Each milestone is **independently usable**. Stop after any one and still have a useful tool.
 
 ## Active slice
 
-**Current: M5 — Polish + ad-hoc-signed release build.**
+**Current: M6 — Per-project notes.**
 
-See `docs/tasks.md` for M5's working tasks.
+See `docs/tasks.md` for M6's working tasks.
 
 M4 is complete (commit `43825bb`): buckets — schema, sidebar UI, footer cycle bar, `⌘J` / `⌘⇧J` cycle hotkeys, app-wide active bucket persisted.
 
@@ -63,6 +64,7 @@ See `docs/ADRs/` for the load-bearing choices:
 - ADR-0006 — Window-to-project identity and the navigate/mutate split
 - ADR-0007 — Bucket model: ordered ring with persisted cursor
 - ADR-0008 — Release process for v0.1 (ad-hoc-signed, no notarization)
+- ADR-0009 — Quill.js for the project notes editor
 
 ## Predicted gotchas (mitigations baked into M1)
 

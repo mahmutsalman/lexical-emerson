@@ -29,3 +29,16 @@ export interface Bucket {
   cursor: number;
   projects: Project[];
 }
+
+export interface NoteSummary {
+  id: number;
+  project_id: number;
+  title: string;
+  user_title: string | null;
+  updated_at: string;
+}
+
+export interface Note extends NoteSummary {
+  content_json: string;
+  created_at: string;
+}

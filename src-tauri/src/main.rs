@@ -17,6 +17,11 @@ use store::Store;
 pub struct AppState {
     pub pty_manager: Mutex<PtyManager>,
     pub store: Store,
+    // The project id currently displayed in the main launcher window (None
+    // when main is in launcher-only mode). Used by spawn_or_focus_project_window
+    // so that opening a project that's ALREADY visible in main focuses main
+    // rather than creating a duplicate project-N window.
+    pub main_project_id: Mutex<Option<i64>>,
 }
 
 fn main() {
@@ -42,6 +47,7 @@ fn main() {
             commands::get_project_by_id,
             commands::request_open_project,
             commands::current_window_label,
+            commands::set_main_project,
             commands::list_buckets,
             commands::create_bucket,
             commands::delete_bucket,
@@ -51,6 +57,14 @@ fn main() {
             commands::set_active_bucket,
             commands::get_active_bucket,
             commands::cycle_bucket,
+            commands::list_notes,
+            commands::get_note,
+            commands::create_note,
+            commands::update_note,
+            commands::delete_note,
+            commands::set_note_title,
+            commands::save_note_image,
+            commands::resolve_note_image,
         ])
         .setup(|app| {
             let app_data = app
@@ -63,6 +77,7 @@ fn main() {
             app.manage(AppState {
                 pty_manager: Mutex::new(PtyManager::new()),
                 store,
+                main_project_id: Mutex::new(None),
             });
 
             let handle = app.handle().clone();
@@ -82,6 +97,7 @@ fn main() {
                 "bucket_next" => "menu://bucket-next",
                 "bucket_prev" => "menu://bucket-prev",
                 "bucket_new" => "menu://bucket-new",
+                "notes_open" => "menu://notes-open",
                 _ => return,
             };
             // Route menu events to the focused window only — broadcasting
@@ -187,6 +203,13 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .item(&bucket_new)
         .build()?;
 
+    let notes_open = MenuItemBuilder::with_id("notes_open", "Open Notes…")
+        .accelerator("CmdOrCtrl+Shift+N")
+        .build(app)?;
+    let notes_submenu = SubmenuBuilder::new(app, "Notes")
+        .item(&notes_open)
+        .build()?;
+
     let window_submenu = SubmenuBuilder::new(app, "Window")
         .minimize()
         .build()?;
@@ -200,6 +223,7 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
             &go_submenu,
             &terminal_submenu,
             &bucket_submenu,
+            &notes_submenu,
             &window_submenu,
         ])
         .build()?;

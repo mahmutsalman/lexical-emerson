@@ -1,5 +1,6 @@
 import {
   Component,
+  createEffect,
   createMemo,
   createResource,
   createSignal,
@@ -8,11 +9,13 @@ import {
   Show,
 } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { BucketBar } from "./components/BucketBar";
 import { BucketsList } from "./components/BucketsList";
 import { FileTree } from "./components/FileTree";
+import { NotesModal } from "./components/NotesModal";
 import { QuickSwitcher } from "./components/QuickSwitcher";
 import { RecentProjects } from "./components/RecentProjects";
 import { TerminalsView } from "./components/TerminalsView";
@@ -29,6 +32,7 @@ import {
   openProject,
   pickFolder,
   requestOpenProject,
+  setMainProject,
 } from "./lib/ipc";
 import type { Bucket, Project } from "./lib/types";
 
@@ -64,6 +68,15 @@ export const App: Component = () => {
   const mutateCurrentProject = async (path: string) => {
     try {
       const proj = await openProject(path);
+      // Single-window-per-project: if a dedicated project window already
+      // exists for the picked folder, focus it instead of duplicating the
+      // project into main. Main stays on whatever it was showing.
+      const existing = await WebviewWindow.getByLabel(`project-${proj.id}`);
+      if (existing) {
+        await existing.setFocus();
+        setRecentsKey((v) => v + 1);
+        return;
+      }
       setCurrentProject(proj);
       setRecentsKey((v) => v + 1);
     } catch (err) {
@@ -148,11 +161,24 @@ export const App: Component = () => {
     });
   });
 
+  // Tell Rust which project main is currently displaying so that other
+  // navigation paths (recents, Cmd+P, bucket cycle, "Open folder") can
+  // focus main instead of duplicating a project window. Only main runs
+  // this effect — project-N windows are locked to their project by label
+  // and Rust never queries main_project_id for them.
+  createEffect(() => {
+    if (!isMain()) return;
+    void setMainProject(currentProject()?.id ?? null);
+  });
+
   onCleanup(() => {
     unlistenFocus?.();
     unlistenBuckets?.();
     unlistenBucketNext?.();
     unlistenBucketPrev?.();
+    if (isMain()) {
+      void setMainProject(null);
+    }
   });
 
   const projectName = () => currentProject()?.name ?? null;
@@ -254,6 +280,13 @@ export const App: Component = () => {
       />
 
       <QuickSwitcher />
+
+      {/* NotesModal is project-scoped — only mounted when a project is loaded.
+          In the main launcher window before a project is picked, currentProject
+          is null and Cmd+Shift+N silently does nothing. */}
+      <Show when={currentProject()}>
+        {(proj) => <NotesModal projectId={proj().id} />}
+      </Show>
     </div>
   );
 };

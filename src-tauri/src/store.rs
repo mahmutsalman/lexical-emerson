@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS notes (
+    id           INTEGER PRIMARY KEY,
+    project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title        TEXT NOT NULL DEFAULT '',
+    user_title   TEXT,
+    content_json TEXT NOT NULL DEFAULT '{\"ops\":[]}',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_notes_project_recent
+    ON notes(project_id, updated_at DESC);
 ";
 
 #[derive(Serialize, Clone)]
@@ -61,6 +73,10 @@ impl Store {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
+        // Additive column migrations for tables that may pre-exist from an
+        // earlier dev run. CREATE TABLE IF NOT EXISTS is a no-op once the
+        // table exists, so new columns must be ALTERed in by hand.
+        migrate_notes_columns(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -291,6 +307,197 @@ impl Store {
         )?;
         Ok(Some(projects[next as usize].clone()))
     }
+
+    // --- notes -------------------------------------------------------------
+
+    pub fn list_notes(&self, project_id: i64) -> Result<Vec<NoteSummary>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, title, user_title, updated_at
+               FROM notes
+              WHERE project_id = ?1
+              ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = stmt.query_map(params![project_id], |row| {
+            Ok(NoteSummary {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                title: row.get(2)?,
+                user_title: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_note(&self, id: i64) -> Result<Note> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.query_row(
+            "SELECT id, project_id, title, user_title, content_json, created_at, updated_at
+               FROM notes WHERE id = ?1",
+            params![id],
+            note_from_row,
+        )
+        .map_err(Into::into)
+    }
+
+    pub fn create_note(&self, project_id: i64) -> Result<Note> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "INSERT INTO notes (project_id) VALUES (?1)",
+            params![project_id],
+        )?;
+        let id = conn.last_insert_rowid();
+        conn.query_row(
+            "SELECT id, project_id, title, user_title, content_json, created_at, updated_at
+               FROM notes WHERE id = ?1",
+            params![id],
+            note_from_row,
+        )
+        .map_err(Into::into)
+    }
+
+    pub fn update_note(&self, id: i64, content_json: &str) -> Result<NoteSummary> {
+        let title = compute_title_from_delta(content_json);
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE notes
+                SET content_json = ?1,
+                    title        = ?2,
+                    updated_at   = datetime('now')
+              WHERE id = ?3",
+            params![content_json, title, id],
+        )?;
+        conn.query_row(
+            "SELECT id, project_id, title, user_title, updated_at
+               FROM notes WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(NoteSummary {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    title: row.get(2)?,
+                    user_title: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
+            },
+        )
+        .map_err(Into::into)
+    }
+
+    // User-controlled title. Empty string is stored as NULL so the list-side
+    // fallback (user_title || auto title || "Untitled note") works cleanly.
+    pub fn set_note_title(
+        &self,
+        id: i64,
+        user_title: Option<&str>,
+    ) -> Result<NoteSummary> {
+        let normalized: Option<&str> = match user_title {
+            Some(s) if !s.trim().is_empty() => Some(s),
+            _ => None,
+        };
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE notes
+                SET user_title = ?1,
+                    updated_at = datetime('now')
+              WHERE id = ?2",
+            params![normalized, id],
+        )?;
+        conn.query_row(
+            "SELECT id, project_id, title, user_title, updated_at
+               FROM notes WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(NoteSummary {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    title: row.get(2)?,
+                    user_title: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
+            },
+        )
+        .map_err(Into::into)
+    }
+
+    pub fn delete_note(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute("DELETE FROM notes WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+}
+
+// Idempotent: read the current columns and append the new ones if missing.
+// Safe to call on every startup; cheap (a single pragma query).
+fn migrate_notes_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(notes)")?;
+    let column_names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !column_names.iter().any(|n| n == "user_title") {
+        conn.execute("ALTER TABLE notes ADD COLUMN user_title TEXT", [])?;
+    }
+    Ok(())
+}
+
+fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
+    Ok(Note {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        title: row.get(2)?,
+        user_title: row.get(3)?,
+        content_json: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+// Walks a Quill Delta JSON document and returns the first non-empty trimmed
+// string insert as the note's title (truncated to 80 chars). Empty docs and
+// docs whose first inserts are only embeds (e.g. images) fall back to
+// "Untitled note".
+fn compute_title_from_delta(json: &str) -> String {
+    const FALLBACK: &str = "Untitled note";
+    const MAX_LEN: usize = 80;
+
+    let value: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return FALLBACK.to_string(),
+    };
+    let ops = match value.get("ops").and_then(|v| v.as_array()) {
+        Some(a) => a,
+        None => return FALLBACK.to_string(),
+    };
+    for op in ops {
+        if let Some(insert) = op.get("insert").and_then(|v| v.as_str()) {
+            // Take the first non-empty line of the run.
+            for line in insert.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    return truncate_chars(trimmed, MAX_LEN);
+                }
+            }
+        }
+    }
+    FALLBACK.to_string()
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    let mut out = String::new();
+    for (i, ch) in s.chars().enumerate() {
+        if i >= max {
+            out.push('…');
+            return out;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 #[derive(Serialize, Clone)]
@@ -299,6 +506,26 @@ pub struct Bucket {
     pub name: String,
     pub cursor: i64,
     pub projects: Vec<Project>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct NoteSummary {
+    pub id: i64,
+    pub project_id: i64,
+    pub title: String,
+    pub user_title: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct Note {
+    pub id: i64,
+    pub project_id: i64,
+    pub title: String,
+    pub user_title: Option<String>,
+    pub content_json: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 fn load_bucket_projects(

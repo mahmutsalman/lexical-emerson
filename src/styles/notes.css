@@ -1,0 +1,453 @@
+/* Notes modal — matches QuickSwitcher styling for a unified overlay look. */
+
+.notes-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 110;
+}
+
+.notes-modal {
+  width: min(960px, calc(100vw - 60px));
+  height: min(640px, calc(100vh - 80px));
+  background: #1a1a1d;
+  border: 1px solid #3a3a42;
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+}
+
+.notes-list-panel {
+  grid-row: 1 / 2;
+  grid-column: 1 / 2;
+  border-right: 1px solid #2a2a2f;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.notes-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2a2a2f;
+  font-size: 12px;
+  font-weight: 600;
+  color: #c9c9d0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.notes-new-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #3a3a42;
+  background: #25252a;
+  color: #c9c9d0;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notes-new-btn:hover {
+  background: #2d2d33;
+  border-color: #4a4a55;
+}
+
+.notes-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.notes-list-item {
+  position: relative;
+  padding: 10px 12px;
+  border-bottom: 1px solid #222226;
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notes-list-item:hover {
+  background: #1f1f24;
+}
+
+.notes-list-item.selected {
+  background: #2d5cc8;
+  color: #ffffff;
+}
+
+.notes-list-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 20px;
+}
+
+.notes-list-item-meta {
+  font-size: 10px;
+  color: #7a7a82;
+}
+
+.notes-list-item.selected .notes-list-item-meta {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.notes-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  color: #5e5e66;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+  display: none;
+}
+
+.notes-list-item:hover .notes-delete-btn,
+.notes-list-item.selected .notes-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notes-delete-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.notes-empty {
+  padding: 18px 14px;
+  font-size: 11px;
+  color: #5e5e66;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.notes-empty kbd {
+  display: inline-block;
+  padding: 0 5px;
+  background: #2a2a2f;
+  border-radius: 3px;
+  color: #c9c9d0;
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 10px;
+}
+
+.notes-editor-panel {
+  grid-row: 1 / 2;
+  grid-column: 2 / 3;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.notes-title-row {
+  display: flex;
+  align-items: stretch;
+  background: #15151a;
+  border-bottom: 1px solid #2a2a2f;
+}
+
+.notes-title-input {
+  background: transparent;
+  color: #ffffff;
+  border: none;
+  font-size: 18px;
+  font-weight: 600;
+  padding: 12px 20px;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.notes-title-input::placeholder {
+  color: #5e5e66;
+  font-weight: 400;
+  font-style: italic;
+}
+
+.notes-title-input:focus {
+  background: #1a1a22;
+}
+
+/* Save button — three discrete visual states. The button stays the same
+   size across states so the layout doesn't shift on save. */
+.notes-save-btn {
+  align-self: center;
+  margin: 0 12px 0 8px;
+  padding: 6px 14px;
+  height: 30px;
+  min-width: 78px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  border: 1px solid #2a2a2f;
+  background: #20202a;
+  color: #5e5e66;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 180ms ease, transform 80ms ease;
+}
+
+.notes-save-btn:disabled {
+  cursor: default;
+}
+
+/* Dirty state — accent colour + soft glow draws the eye to "save me". */
+.notes-save-btn.dirty {
+  background: #2d5cc8;
+  color: #ffffff;
+  border-color: #4f7ce5;
+  box-shadow: 0 0 0 1px rgba(91, 141, 239, 0.4),
+    0 0 14px rgba(91, 141, 239, 0.45);
+  animation: notes-save-pulse 1.8s ease-in-out infinite;
+}
+
+.notes-save-btn.dirty:hover {
+  background: #3669d6;
+  box-shadow: 0 0 0 1px rgba(91, 141, 239, 0.55),
+    0 0 18px rgba(91, 141, 239, 0.6);
+}
+
+.notes-save-btn.dirty:active {
+  transform: translateY(1px);
+}
+
+.notes-save-btn.saving {
+  background: #2a2a35;
+  color: #c9c9d0;
+  border-color: #3a3a4a;
+  animation: none;
+  cursor: progress;
+}
+
+@keyframes notes-save-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(91, 141, 239, 0.35),
+      0 0 12px rgba(91, 141, 239, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(91, 141, 239, 0.55),
+      0 0 22px rgba(91, 141, 239, 0.65);
+  }
+}
+
+.notes-editor-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #5e5e66;
+  font-size: 13px;
+}
+
+.notes-editor-slot {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Adopted Quill host fills the slot. Quill v2 inserts .ql-toolbar as a
+   previous sibling of the container element we passed it, so the host has
+   two direct children — the toolbar (auto height) and the container
+   (fills remaining). Targeting them by class avoids accidentally applying
+   flex-direction:column to the toolbar (which stacks its .ql-formats
+   groups vertically — the symptom from the screenshot). */
+.notes-editor-slot > .notes-quill-host {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.notes-quill-host > .ql-toolbar {
+  flex: 0 0 auto;
+}
+
+.notes-quill-host > .ql-container {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Quill Snow theme adjustments scoped to this modal. */
+.notes-modal .ql-toolbar.ql-snow {
+  background: #20202a;
+  border: none;
+  border-bottom: 1px solid #2a2a2f;
+}
+
+.notes-modal .ql-toolbar.ql-snow .ql-stroke {
+  stroke: #c9c9d0;
+}
+
+.notes-modal .ql-toolbar.ql-snow .ql-fill {
+  fill: #c9c9d0;
+}
+
+.notes-modal .ql-toolbar.ql-snow .ql-picker-label {
+  color: #c9c9d0;
+}
+
+.notes-modal .ql-container.ql-snow {
+  border: none;
+  background: #15151a;
+  color: #e5e5ec;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  flex: 1;
+  overflow: auto;
+}
+
+.notes-modal .ql-editor {
+  min-height: 100%;
+  padding: 16px 20px;
+}
+
+.notes-modal .ql-editor.ql-blank::before {
+  color: #5e5e66;
+  font-style: italic;
+}
+
+/* Pasted images render as thumbnails inline. Click opens the lightbox for
+   a full-size view. The visible footprint stays small so the editor doesn't
+   become a screenshot scroll. */
+.notes-modal .ql-editor img {
+  max-width: 220px;
+  max-height: 160px;
+  height: auto;
+  width: auto;
+  display: block;
+  margin: 8px 0 2px;
+  border-radius: 4px;
+  border: 1px solid #2a2a2f;
+  cursor: zoom-in;
+  transition: border-color 120ms ease;
+}
+
+.notes-modal .ql-editor img:hover {
+  border-color: #5b8def;
+}
+
+.notes-modal .ql-editor pre.ql-syntax,
+.notes-modal .ql-editor pre,
+.notes-modal .ql-editor code {
+  background: #0f0f14;
+  color: #e2c787;
+  border-radius: 4px;
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 13px;
+}
+
+.notes-modal .ql-editor pre.ql-syntax,
+.notes-modal .ql-editor pre {
+  padding: 10px 12px;
+}
+
+.notes-modal .ql-editor code {
+  padding: 1px 5px;
+}
+
+.notes-modal .ql-snow .ql-picker-options {
+  background: #1a1a1d;
+  border: 1px solid #3a3a42;
+}
+
+.notes-modal .ql-snow .ql-tooltip {
+  background: #1a1a1d;
+  border: 1px solid #3a3a42;
+  color: #c9c9d0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.notes-modal .ql-snow .ql-tooltip input[type="text"] {
+  background: #0f0f14;
+  color: #e5e5ec;
+  border: 1px solid #2a2a2f;
+}
+
+.notes-hint {
+  grid-row: 2 / 3;
+  grid-column: 1 / -1;
+  padding: 8px 16px;
+  border-top: 1px solid #2a2a2f;
+  font-size: 11px;
+  color: #5e5e66;
+  display: flex;
+  gap: 14px;
+  background: #15151a;
+}
+
+.notes-hint kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  background: #2a2a2f;
+  border-radius: 3px;
+  color: #c9c9d0;
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  margin-right: 4px;
+}
+
+/* Lightbox — full-screen overlay above the notes modal for click-to-zoom
+   image inspection. Stays above the modal (z-index 120 > modal 110). */
+.notes-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  padding: 40px;
+  gap: 16px;
+}
+
+.notes-lightbox img {
+  max-width: 100%;
+  max-height: calc(100% - 40px);
+  object-fit: contain;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+}
+
+.notes-lightbox-hint {
+  color: #c9c9d0;
+  font-size: 11px;
+  font-family: "SF Mono", Menlo, monospace;
+}
+
+.notes-lightbox-hint kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  background: #2a2a2f;
+  border-radius: 3px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 10px;
+}
