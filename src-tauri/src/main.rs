@@ -50,6 +50,8 @@ fn main() {
             commands::set_main_project,
             commands::set_project_color,
             commands::set_project_zoom,
+            commands::hide_project,
+            commands::reveal_in_finder,
             commands::list_buckets,
             commands::create_bucket,
             commands::delete_bucket,

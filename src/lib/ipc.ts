@@ -102,6 +102,14 @@ export async function setProjectZoom(
   return await invoke<Project>("set_project_zoom", { id, zoom });
 }
 
+export async function hideProject(id: number): Promise<void> {
+  await invoke("hide_project", { id });
+}
+
+export async function revealInFinder(path: string): Promise<void> {
+  await invoke("reveal_in_finder", { path });
+}
+
 export async function requestOpenProject(path: string): Promise<Project> {
   return await invoke<Project>("request_open_project", { path });
 }

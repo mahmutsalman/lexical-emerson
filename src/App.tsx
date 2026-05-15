@@ -322,7 +322,12 @@ export const App: Component = () => {
           <RecentProjects
             refreshKey={recentsKey()}
             activePath={projectPath()}
+            activeBucketId={activeBucketId() ?? null}
             onPick={(path) => navigateToProject(path)}
+            onChanged={() => {
+              setRecentsKey((v) => v + 1);
+              setBucketsKey((v) => v + 1);
+            }}
           />
         </div>
 

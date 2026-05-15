@@ -194,6 +194,23 @@ pub fn set_project_zoom(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn hide_project(state: State<AppState>, id: i64) -> Result<(), String> {
+    state.store.hide_project(id).map_err(|e| e.to_string())
+}
+
+// Reveal the project folder in macOS Finder. `open -R` highlights the target
+// in its parent window; if the path no longer exists Finder surfaces its own
+// dialog, which is the right behavior for a "show me where this was" action.
+#[tauri::command]
+pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .args(["-R", &path])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("open -R {path}: {e}"))
+}
+
 // Spawn a dedicated window for the given project, or focus the existing one
 // if it's already open. See ADR-0006.
 //

@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS projects (
     last_focused_at TEXT,
     last_active_at  TEXT,
     color           TEXT,
-    zoom            REAL NOT NULL DEFAULT 1.0
+    zoom            REAL NOT NULL DEFAULT 1.0,
+    hidden_at       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_projects_recent
     ON projects(last_active_at DESC, last_focused_at DESC);
@@ -89,12 +90,16 @@ impl Store {
 
     pub fn register_or_focus(&self, path: &str, name: &str) -> Result<Project> {
         let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        // Re-opening a project clears any prior soft-hide so it returns to the
+        // recents list (mirrors the user's mental model of "I opened it again,
+        // so it's relevant again").
         conn.execute(
             "INSERT INTO projects (path, name, last_focused_at)
                   VALUES (?1, ?2, datetime('now'))
              ON CONFLICT(path) DO UPDATE SET
                  last_focused_at = datetime('now'),
-                 name            = excluded.name",
+                 name            = excluded.name,
+                 hidden_at       = NULL",
             params![path, name],
         )?;
         select_by_path(&conn, path)
@@ -118,6 +123,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, path, name, last_focused_at, last_active_at, color, zoom
                FROM projects
+              WHERE hidden_at IS NULL
               ORDER BY MAX(
                   COALESCE(last_active_at, '1970-01-01'),
                   datetime(COALESCE(last_focused_at, '1970-01-01'), '-1 hours')
@@ -188,6 +194,18 @@ impl Store {
             project_from_row,
         )
         .map_err(Into::into)
+    }
+
+    // Soft-hide: project keeps its row (notes + bucket memberships survive)
+    // but is excluded from the recents list. Reopening the folder clears
+    // hidden_at via register_or_focus.
+    pub fn hide_project(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE projects SET hidden_at = datetime('now') WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
     }
 
     // --- buckets -----------------------------------------------------------
@@ -497,6 +515,9 @@ fn migrate_projects_columns(conn: &Connection) -> Result<()> {
         )?;
         // ALTER ... DEFAULT applies to inserts only; backfill existing rows.
         conn.execute("UPDATE projects SET zoom = 1.0 WHERE zoom IS NULL", [])?;
+    }
+    if !column_names.iter().any(|n| n == "hidden_at") {
+        conn.execute("ALTER TABLE projects ADD COLUMN hidden_at TEXT", [])?;
     }
     Ok(())
 }
