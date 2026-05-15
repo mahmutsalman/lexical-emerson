@@ -162,10 +162,10 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .accelerator("CmdOrCtrl+W")
         .build(app)?;
     let terminal_next = MenuItemBuilder::with_id("terminal_next", "Next Terminal")
-        .accelerator("CmdOrCtrl+Shift+]")
+        .accelerator("CmdOrCtrl+K")
         .build(app)?;
     let terminal_prev = MenuItemBuilder::with_id("terminal_prev", "Previous Terminal")
-        .accelerator("CmdOrCtrl+Shift+[")
+        .accelerator("CmdOrCtrl+Shift+K")
         .build(app)?;
 
     let terminal_submenu = SubmenuBuilder::new(app, "Terminal")
