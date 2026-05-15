@@ -239,6 +239,63 @@
   zoom: 1;
 }
 
+.terminals-view.is-3d .terminal-tabs {
+  display: none;
+}
+
+.terminals-view.is-3d .terminal-stack {
+  perspective: 1400px;
+  /* Anchor the vanishing point at the TOP of the stack so all rotated
+     terminals keep their top edges aligned — perspective shrinks them
+     toward the top instead of toward the centre, which caused the user's
+     "third terminal starts higher" complaint. Tops anchored, bottoms
+     compress upward as terminals rotate back. */
+  perspective-origin: 50% 0%;
+  overflow: hidden;
+}
+
+.cylinder {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+.cylinder.is-3d {
+  transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+.terminal-host.is-3d {
+  /* Centred horizontally inside .cylinder so the host's transform-origin
+     (default 50% 50%) lines up with the wrapper's transform-origin — both
+     end up at the cylinder's central axis, which is what the carousel math
+     assumes. The 19% margins give the host a 62%-wide face, leaving room
+     for the neighbours to peek in. The base `.terminal-host { inset: 0 }`
+     is overridden by these four properties. */
+  inset: 0 19%;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 220ms ease, transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform, opacity;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.terminal-host.is-3d.is-facing {
+  pointer-events: auto;
+  opacity: 1;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25), 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Drop the inner padding in 3D mode — xterm.js measures mouse positions
+   against its rect, and a padding-driven offset between the click target and
+   the rendered cells shows up as a "selection one row below click" bug under
+   CSS transforms. Zero padding in 3D removes that variable. */
+.terminal-host.is-3d .xterm {
+  padding: 0;
+}
+
 .bucket-bar {
   grid-column: 1 / -1;
   grid-row: 2;

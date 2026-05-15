@@ -110,6 +110,9 @@ fn main() {
                 "terminal_close" => "menu://terminal-close",
                 "terminal_next" => "menu://terminal-next",
                 "terminal_prev" => "menu://terminal-prev",
+                "terminal_3d" => "menu://terminal-toggle-3d",
+                "terminal_rotate_left" => "menu://terminal-rotate-left",
+                "terminal_rotate_right" => "menu://terminal-rotate-right",
                 "go_quick_switcher" => "menu://quick-switcher",
                 "bucket_next" => "menu://bucket-next",
                 "bucket_prev" => "menu://bucket-prev",
@@ -226,6 +229,17 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let terminal_prev = MenuItemBuilder::with_id("terminal_prev", "Previous Terminal")
         .accelerator("CmdOrCtrl+Shift+K")
         .build(app)?;
+    let terminal_3d = MenuItemBuilder::with_id("terminal_3d", "Toggle 3D Arc View")
+        .accelerator("CmdOrCtrl+Alt+3")
+        .build(app)?;
+    let terminal_rotate_left =
+        MenuItemBuilder::with_id("terminal_rotate_left", "Rotate Arc Left")
+            .accelerator("CmdOrCtrl+Alt+Left")
+            .build(app)?;
+    let terminal_rotate_right =
+        MenuItemBuilder::with_id("terminal_rotate_right", "Rotate Arc Right")
+            .accelerator("CmdOrCtrl+Alt+Right")
+            .build(app)?;
 
     let terminal_submenu = SubmenuBuilder::new(app, "Terminal")
         .item(&terminal_new)
@@ -233,6 +247,10 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .separator()
         .item(&terminal_next)
         .item(&terminal_prev)
+        .separator()
+        .item(&terminal_3d)
+        .item(&terminal_rotate_left)
+        .item(&terminal_rotate_right)
         .build()?;
 
     let zoom_in = MenuItemBuilder::with_id("zoom_in", "Zoom In")
