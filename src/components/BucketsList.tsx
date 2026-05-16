@@ -13,6 +13,7 @@ import {
   addToBucket,
   createBucket,
   deleteBucket,
+  loadActiveClaudeSessionsForBucket,
   onMenuEvent,
   removeFromBucket,
   requestOpenProject,
@@ -86,6 +87,18 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
       await setBucketAutoRestore(b.id, !b.auto_restore_sessions);
     } catch (err) {
       console.error("setBucketAutoRestore failed:", err);
+    }
+  };
+
+  const handleLoadActiveSessions = async (b: Bucket) => {
+    closeMenu();
+    try {
+      const count = await loadActiveClaudeSessionsForBucket(b.id);
+      console.info(
+        `[bucket ${b.id}] opened ${count} window(s) with persisted sessions`,
+      );
+    } catch (err) {
+      console.error("loadActiveClaudeSessionsForBucket failed:", err);
     }
   };
 
@@ -333,8 +346,17 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
               <button
                 type="button"
                 class="context-menu-item"
+                disabled={m().bucket.projects.length === 0}
+                onClick={() => handleLoadActiveSessions(m().bucket)}
+                title="Spawn project windows for every project in this bucket that has a persisted Claude session from the last quit"
+              >
+                Load active Claude sessions
+              </button>
+              <button
+                type="button"
+                class="context-menu-item"
                 onClick={() => handleToggleAutoRestore(m().bucket)}
-                title="When on, this bucket's Claude sessions are restored on next launch"
+                title="When on, this bucket's Claude sessions are saved on quit so they can be restored later"
               >
                 Auto-restore Claude sessions:{" "}
                 {m().bucket.auto_restore_sessions ? "on" : "off"}
@@ -348,7 +370,7 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
 };
 
 const MENU_W = 240;
-const MENU_H = 120;
+const MENU_H = 160;
 
 function clampMenuX(x: number): number {
   const max = window.innerWidth - MENU_W - 8;

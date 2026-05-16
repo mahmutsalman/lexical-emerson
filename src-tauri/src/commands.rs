@@ -847,15 +847,21 @@ pub fn persist_project_terminals(
     project_id: i64,
     cwds: Vec<String>,
 ) -> Result<(), String> {
+    eprintln!(
+        "[persist] enter project_id={} cwds={:?}",
+        project_id, cwds
+    );
     let gate = state
         .store
         .project_has_auto_restore_bucket(project_id)
         .map_err(|e| e.to_string())?;
+    eprintln!("[persist] gate={}", gate);
     if !gate {
         state
             .store
             .delete_persisted_terminals_for_project(project_id)
             .map_err(|e| e.to_string())?;
+        eprintln!("[persist] gate closed: cleared rows, returning");
         return Ok(());
     }
 
@@ -863,6 +869,7 @@ pub fn persist_project_terminals(
     let mut rows: Vec<(String, Option<String>)> = Vec::new();
     for cwd in cwds {
         let uuid = session_restore::detect_claude_session(&cwd, &mut claimed);
+        eprintln!("[persist] cwd={} detected_uuid={:?}", cwd, uuid);
         // Claude-only filter: tabs with no detected session are skipped.
         if uuid.is_some() {
             rows.push((cwd, uuid));
@@ -873,6 +880,7 @@ pub fn persist_project_terminals(
         .store
         .replace_persisted_terminals_for_project(project_id, &rows)
         .map_err(|e| e.to_string())?;
+    eprintln!("[persist] wrote {} rows, exiting OK", rows.len());
     Ok(())
 }
 
@@ -926,4 +934,51 @@ pub fn delete_persisted_terminals_for_project(
         .store
         .delete_persisted_terminals_for_project(project_id)
         .map_err(|e| e.to_string())
+}
+
+// Launch-time recovery: returns every project_id that had persisted
+// terminals at the last shutdown. Currently unused by the frontend —
+// kept for diagnostic/testing use. Restore is driven per-bucket via
+// `load_active_claude_sessions_for_bucket` so the user picks which
+// bucket to restore instead of auto-spawning every persisted window.
+#[tauri::command]
+pub fn list_persisted_project_ids(
+    state: State<AppState>,
+) -> Result<Vec<i64>, String> {
+    state
+        .store
+        .list_persisted_project_ids()
+        .map_err(|e| e.to_string())
+}
+
+// Right-click → "Load active Claude sessions" action on a bucket row.
+// Finds every project in this bucket that has at least one persisted
+// terminal row and spawns its dedicated window (or focuses the
+// existing one). Each freshly-spawned project window's TerminalsView
+// then runs its own `list_persisted_terminals` on mount, which is
+// where `claude --resume <uuid>` actually gets injected.
+//
+// Returns the count of windows touched so the frontend can show a
+// brief confirmation if it wants to. A bucket with zero persisted
+// projects returns 0 — the caller can treat it as a no-op.
+#[tauri::command(rename_all = "camelCase")]
+pub fn load_active_claude_sessions_for_bucket(
+    app: AppHandle,
+    state: State<AppState>,
+    bucket_id: i64,
+) -> Result<usize, String> {
+    let ids = state
+        .store
+        .list_persisted_project_ids_in_bucket(bucket_id)
+        .map_err(|e| e.to_string())?;
+    let mut count = 0usize;
+    for id in ids {
+        let proj = match state.store.get_by_id(id).map_err(|e| e.to_string())? {
+            Some(p) => p,
+            None => continue, // row in persisted_terminals but project gone
+        };
+        spawn_or_focus_project_window(&app, &proj)?;
+        count += 1;
+    }
+    Ok(count)
 }

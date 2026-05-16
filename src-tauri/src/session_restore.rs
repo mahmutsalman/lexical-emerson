@@ -4,8 +4,10 @@ use std::time::{Duration, SystemTime};
 
 // How far back of an mtime gap we tolerate when matching a tab's cwd to a
 // Claude session file. Anything older than this is assumed to be an
-// abandoned/historical conversation we shouldn't auto-resume.
-const SESSION_MTIME_WINDOW: Duration = Duration::from_secs(6 * 60 * 60);
+// abandoned/historical conversation we shouldn't auto-resume. 48h covers
+// the common "left it overnight" / "came back after a weekend" cases while
+// still rejecting truly stale jsonl files that happen to share the cwd.
+const SESSION_MTIME_WINDOW: Duration = Duration::from_secs(48 * 60 * 60);
 
 // Encode an absolute cwd the way Claude Code names its per-project dir under
 // `~/.claude/projects/`: every `/` becomes `-`. Verified by inspecting the

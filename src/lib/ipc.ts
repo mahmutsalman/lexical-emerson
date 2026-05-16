@@ -300,6 +300,25 @@ export async function deletePersistedTerminalsForProject(
   await invoke("delete_persisted_terminals_for_project", { projectId });
 }
 
+// Distinct project ids with persisted terminal rows. Currently unused
+// by UI code — restore is driven per-bucket via
+// `loadActiveClaudeSessionsForBucket`. Kept here for diagnostic use.
+export async function listPersistedProjectIds(): Promise<number[]> {
+  return await invoke<number[]>("list_persisted_project_ids");
+}
+
+// Right-click → "Load active Claude sessions" action. Spawns project
+// windows for every project in this bucket that has a persisted
+// terminal row. Each spawned window's TerminalsView then runs
+// `claude --resume <uuid>` on its own. Returns count of windows opened.
+export async function loadActiveClaudeSessionsForBucket(
+  bucketId: number,
+): Promise<number> {
+  return await invoke<number>("load_active_claude_sessions_for_bucket", {
+    bucketId,
+  });
+}
+
 // --- notes -----------------------------------------------------------------
 
 export async function listNotes(projectId: number): Promise<NoteSummary[]> {

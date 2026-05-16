@@ -29,7 +29,6 @@ import {
   cycleBucket,
   getActiveBucket,
   getProjectById,
-  lastProject,
   listBuckets,
   markFocused,
   onBucketsChanged,
@@ -169,15 +168,11 @@ export const App: Component = () => {
     }
 
     if (label === "main") {
-      try {
-        const last = await lastProject();
-        if (last) {
-          setCurrentProject(last);
-          setRecentsKey((v) => v + 1);
-        }
-      } catch (err) {
-        console.error("lastProject failed:", err);
-      }
+      // Intentionally NOT loading lastProject or any persisted projects on
+      // launch. The user-driven workflow is: open the app → see the
+      // launcher → right-click a bucket → "Load active Claude sessions"
+      // to restore that bucket's windows. Avoids surprise window-spawn
+      // storms when multiple buckets had persisted sessions at last quit.
     } else if (label.startsWith("project-")) {
       const id = parseInt(label.slice("project-".length), 10);
       if (Number.isFinite(id)) {

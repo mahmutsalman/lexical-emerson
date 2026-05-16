@@ -354,12 +354,29 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     const win = getCurrentWebviewWindow();
     const unlistenClose = await win.onCloseRequested(async (event) => {
       event.preventDefault();
+      // Persist is best-effort: if Rust hangs (mutex contention, slow FS),
+      // we still need to destroy the window so the user isn't stuck staring
+      // at a window that won't close. 1.5s is the upper bound on a healthy
+      // persist call (a few SQLite writes + a dir scan).
+      const PERSIST_TIMEOUT_MS = 1500;
+      console.info("[close] persist starting", { projectId: props.projectId });
       try {
         const cwds = projectTabs().map((t) => t.cwd);
-        await persistProjectTerminals(props.projectId, cwds);
+        await Promise.race([
+          persistProjectTerminals(props.projectId, cwds).then(() =>
+            console.info("[close] persist resolved"),
+          ),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("persist timeout")),
+              PERSIST_TIMEOUT_MS,
+            ),
+          ),
+        ]);
       } catch (err) {
-        console.warn("persistProjectTerminals failed:", err);
+        console.warn("[close] persistProjectTerminals failed/timeout:", err);
       }
+      console.info("[close] destroying window");
       await win.destroy();
     });
 

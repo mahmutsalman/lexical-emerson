@@ -99,6 +99,8 @@ fn main() {
             commands::persist_project_terminals,
             commands::list_persisted_terminals,
             commands::delete_persisted_terminals_for_project,
+            commands::list_persisted_project_ids,
+            commands::load_active_claude_sessions_for_bucket,
         ])
         .setup(|app| {
             let app_data = app
@@ -132,6 +134,18 @@ fn main() {
                 }
                 "window_prev" => {
                     cycle_app_windows(app, -1);
+                    return;
+                }
+                "window_close" => {
+                    // Close the currently-focused window. Triggers the
+                    // window's onCloseRequested handler (persist + destroy)
+                    // just like clicking the red traffic-light button.
+                    for (_, window) in app.webview_windows() {
+                        if window.is_focused().unwrap_or(false) {
+                            let _ = window.close();
+                            break;
+                        }
+                    }
                     return;
                 }
                 _ => {}
@@ -177,8 +191,73 @@ fn main() {
             // Fallback if no window claims focus (rare; e.g. all minimized).
             let _ = app.emit(event_name, ());
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Lexical Emerson");
+        .build(tauri::generate_context!())
+        .expect("error while building Lexical Emerson")
+        .run(|app, event| {
+            // On ⌘Q (or any app-level exit request), give every open project
+            // window a chance to fire its onCloseRequested handler — that's
+            // where persist_project_terminals runs. Without this, Tauri's
+            // default ExitRequested behavior tears windows down before their
+            // async close handlers can finish snapshotting tabs to SQLite,
+            // so quitting via ⌘Q would silently skip session persistence.
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                // Close BOTH main and project-* windows: main may also be
+                // hosting a project (via lastProject), in which case its
+                // TerminalsView holds the only onCloseRequested handler
+                // that can persist that project's tabs. Excluding main
+                // here silently dropped its persist on ⌘Q.
+                let windows: Vec<tauri::WebviewWindow> = app
+                    .webview_windows()
+                    .into_iter()
+                    .filter(|(label, _)| {
+                        label.as_str() == "main"
+                            || label.starts_with("project-")
+                    })
+                    .map(|(_, w)| w)
+                    .collect();
+                if windows.is_empty() {
+                    return;
+                }
+                eprintln!(
+                    "[exit] {} window(s) open; closing each before exit",
+                    windows.len()
+                );
+                api.prevent_exit();
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    for win in &windows {
+                        let _ = win.close();
+                    }
+                    // Each window has a 1.5s persist-timeout race in
+                    // TerminalsView.tsx, so 3s is generous slack. Poll the
+                    // window set so we exit as soon as everyone's gone.
+                    let start = std::time::Instant::now();
+                    loop {
+                        let remaining = app
+                            .webview_windows()
+                            .iter()
+                            .filter(|(label, _)| {
+                                label.as_str() == "main"
+                                    || label.starts_with("project-")
+                            })
+                            .count();
+                        if remaining == 0 {
+                            eprintln!("[exit] all windows destroyed");
+                            break;
+                        }
+                        if start.elapsed() > std::time::Duration::from_secs(3) {
+                            eprintln!(
+                                "[exit] {} window(s) still open after 3s, forcing exit",
+                                remaining
+                            );
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    app.exit(0);
+                });
+            }
+        });
 }
 
 // Cycle focus across every open project window (main + project-<id>).
@@ -360,8 +439,15 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let window_prev = MenuItemBuilder::with_id("window_prev", "Cycle Window Backward")
         .accelerator("CmdOrCtrl+Alt+Shift+J")
         .build(app)?;
+    // ⌘⇧W follows the Chrome / VS Code / iTerm2 convention when ⌘W is for
+    // tab-level close (here: terminal_close). Routes to window.close() which
+    // triggers the project window's onCloseRequested → persist → destroy.
+    let window_close = MenuItemBuilder::with_id("window_close", "Close Window")
+        .accelerator("CmdOrCtrl+Shift+W")
+        .build(app)?;
     let window_submenu = SubmenuBuilder::new(app, "Window")
         .minimize()
+        .item(&window_close)
         .separator()
         .item(&window_next)
         .item(&window_prev)

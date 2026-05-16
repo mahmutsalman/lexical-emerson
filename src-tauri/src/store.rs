@@ -527,6 +527,48 @@ impl Store {
         Ok(count > 0)
     }
 
+    // Distinct project ids in `bucket_id` that have any persisted terminal
+    // row. Drives the bucket's right-click "Load active Claude sessions"
+    // action — only spawns windows for projects that actually have
+    // something to restore in this specific bucket.
+    pub fn list_persisted_project_ids_in_bucket(
+        &self,
+        bucket_id: i64,
+    ) -> Result<Vec<i64>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT pt.project_id
+               FROM persisted_terminals pt
+               JOIN bucket_projects bp ON bp.project_id = pt.project_id
+              WHERE bp.bucket_id = ?1
+              ORDER BY pt.project_id",
+        )?;
+        let rows = stmt.query_map(params![bucket_id], |row| row.get::<_, i64>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    // Distinct project ids that have any persisted terminal row. Used at
+    // launch to decide which project windows to auto-reopen so that each
+    // window's TerminalsView can then run its own restore.
+    pub fn list_persisted_project_ids(&self) -> Result<Vec<i64>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT project_id
+               FROM persisted_terminals
+              ORDER BY project_id",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, i64>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     pub fn list_persisted_terminals_for_project(
         &self,
         project_id: i64,
