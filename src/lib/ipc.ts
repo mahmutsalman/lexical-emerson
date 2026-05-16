@@ -10,6 +10,7 @@ import type {
   Project,
   PtyDataEvent,
   PtyExitEvent,
+  PtyTerminalInfo,
 } from "./types";
 
 export async function pickFolder(): Promise<string | null> {
@@ -27,8 +28,16 @@ export async function openTerminal(
   cwd: string,
   cols: number,
   rows: number,
+  projectId?: number,
+  projectPath?: string,
 ): Promise<string> {
-  return await invoke<string>("open_terminal", { cwd, cols, rows });
+  return await invoke<string>("open_terminal", {
+    cwd,
+    cols,
+    rows,
+    projectId: projectId ?? null,
+    projectPath: projectPath ?? null,
+  });
 }
 
 export async function writeTerminal(
@@ -173,6 +182,68 @@ export async function onBucketsChanged(cb: () => void): Promise<UnlistenFn> {
   return await listen<void>("buckets://changed", () => cb());
 }
 
+// --- terminal registry & bucket workspace ----------------------------------
+
+export async function registerTerminal(
+  ptyId: string,
+  projectId: number,
+  projectPath: string,
+  title: string | null,
+): Promise<void> {
+  await invoke("register_terminal", {
+    ptyId,
+    projectId,
+    projectPath,
+    title,
+  });
+}
+
+export async function unregisterTerminal(ptyId: string): Promise<void> {
+  await invoke("unregister_terminal", { ptyId });
+}
+
+export async function listTerminalsForBucket(
+  bucketId: number,
+): Promise<PtyTerminalInfo[]> {
+  return await invoke<PtyTerminalInfo[]>("list_terminals_for_bucket", {
+    bucketId,
+  });
+}
+
+export async function listAllRegisteredTerminals(): Promise<PtyTerminalInfo[]> {
+  return await invoke<PtyTerminalInfo[]>("list_all_registered_terminals");
+}
+
+export async function rescanTerminals(): Promise<void> {
+  await invoke("rescan_terminals");
+}
+
+export async function onRescanRequest(cb: () => void): Promise<UnlistenFn> {
+  return await listen<void>("terminals://rescan-request", () => cb());
+}
+
+export async function spawnBucket3DWorkspace(bucketId: number): Promise<void> {
+  await invoke("spawn_bucket_3d_workspace", { bucketId });
+}
+
+// Debug helper exposed in the workspace's diagnostic panel. Inserts a
+// fake entry directly into pty_registry — bypasses the spawn path so we
+// can verify the read path (list_all_registered_terminals) and the
+// terminals://changed broadcast still work end-to-end.
+export async function debugInsertFakeRegistryEntry(
+  projectId: number,
+  projectPath: string,
+): Promise<string> {
+  return await invoke<string>("debug_insert_fake_registry_entry", {
+    projectId,
+    projectPath,
+  });
+}
+
+export async function onTerminalsChanged(cb: () => void): Promise<UnlistenFn> {
+  return await listen<void>("terminals://changed", () => cb());
+}
+
 // --- notes -----------------------------------------------------------------
 
 export async function listNotes(projectId: number): Promise<NoteSummary[]> {
@@ -241,7 +312,9 @@ export async function onMenuEvent(
     | "zoom-in"
     | "zoom-out"
     | "zoom-reset"
-    | "file-open-folder",
+    | "file-open-folder"
+    | "bucket-3d-ring-prev"
+    | "bucket-3d-ring-next",
   cb: () => void,
 ): Promise<UnlistenFn> {
   // Scope to the current webview window. The Rust side emits with

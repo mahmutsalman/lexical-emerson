@@ -1,11 +1,13 @@
 import {
   Component,
+  createEffect,
   createSignal,
   For,
   onCleanup,
   onMount,
   Show,
 } from "solid-js";
+import { Portal } from "solid-js/web";
 
 import {
   addToBucket,
@@ -14,8 +16,15 @@ import {
   onMenuEvent,
   removeFromBucket,
   setActiveBucket,
+  spawnBucket3DWorkspace,
 } from "../lib/ipc";
 import type { Bucket } from "../lib/types";
+
+type BucketMenuState = {
+  bucket: Bucket;
+  x: number;
+  y: number;
+};
 
 export interface BucketsListProps {
   buckets: Bucket[];
@@ -27,8 +36,46 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
   const [expanded, setExpanded] = createSignal<Record<number, boolean>>({});
   const [newOpen, setNewOpen] = createSignal(false);
   const [newName, setNewName] = createSignal("");
+  const [menu, setMenu] = createSignal<BucketMenuState | null>(null);
+  const closeMenu = () => setMenu(null);
 
   let newInputEl: HTMLInputElement | undefined;
+
+  const openMenu = (e: MouseEvent, b: Bucket) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ bucket: b, x: e.clientX, y: e.clientY });
+  };
+
+  // Mirror RecentProjects.tsx's dismissal listeners — outside click, Escape,
+  // or scroll all close the menu. Window-level so any region of the app
+  // dismisses it consistently.
+  createEffect(() => {
+    if (!menu()) return;
+    const onDocClick = () => closeMenu();
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") closeMenu();
+    };
+    const onScroll = () => closeMenu();
+    window.addEventListener("mousedown", onDocClick);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    onCleanup(() => {
+      window.removeEventListener("mousedown", onDocClick);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+    });
+  });
+
+  const handleOpenWorkspace = async (b: Bucket) => {
+    closeMenu();
+    if (b.projects.length === 0) return;
+    try {
+      await spawnBucket3DWorkspace(b.id);
+    } catch (err) {
+      console.error("spawnBucket3DWorkspace failed:", err);
+    }
+  };
 
   onMount(async () => {
     const unlisten = await onMenuEvent("bucket-new", () => {
@@ -141,7 +188,11 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
 
             return (
               <div class={`bucket-row ${isActive() ? "active" : ""}`}>
-                <div class="bucket-header" onClick={handleSetActive}>
+                <div
+                  class="bucket-header"
+                  onClick={handleSetActive}
+                  onContextMenu={(e) => openMenu(e, bucket)}
+                >
                   <button
                     type="button"
                     class="bucket-chevron"
@@ -209,6 +260,49 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
           }}
         </For>
       </Show>
+
+      <Show when={menu()}>
+        {(m) => (
+          <Portal>
+            <div
+              class="context-menu"
+              style={{
+                left: `${clampMenuX(m().x)}px`,
+                top: `${clampMenuY(m().y)}px`,
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              role="menu"
+            >
+              <button
+                type="button"
+                class="context-menu-item"
+                disabled={m().bucket.projects.length === 0}
+                onClick={() => handleOpenWorkspace(m().bucket)}
+                title={
+                  m().bucket.projects.length === 0
+                    ? "Add at least one project to this bucket first"
+                    : undefined
+                }
+              >
+                Open in 3D Workspace
+              </button>
+            </div>
+          </Portal>
+        )}
+      </Show>
     </div>
   );
 };
+
+const MENU_W = 220;
+const MENU_H = 80;
+
+function clampMenuX(x: number): number {
+  const max = window.innerWidth - MENU_W - 8;
+  return Math.min(Math.max(x, 8), Math.max(8, max));
+}
+
+function clampMenuY(y: number): number {
+  const max = window.innerHeight - MENU_H - 8;
+  return Math.min(Math.max(y, 8), Math.max(8, max));
+}

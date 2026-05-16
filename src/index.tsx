@@ -4,6 +4,7 @@ import { render } from "solid-js/web";
 import "./styles/reset.css";
 import "./styles/app.css";
 import "./styles/notes.css";
+import "./styles/bucket-workspace.css";
 import "@xterm/xterm/css/xterm.css";
 
 import { App } from "./App";

@@ -227,6 +227,24 @@ impl Store {
         Ok(out)
     }
 
+    pub fn get_bucket(&self, id: i64) -> Result<Option<Bucket>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        match conn.query_row(
+            "SELECT id, name, cursor FROM buckets WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+            },
+        ) {
+            Ok((id, name, cursor)) => {
+                let projects = load_bucket_projects(&conn, id)?;
+                Ok(Some(Bucket { id, name, cursor, projects }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     pub fn create_bucket(&self, name: &str) -> Result<Bucket> {
         let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
         conn.execute("INSERT INTO buckets (name) VALUES (?1)", params![name])?;

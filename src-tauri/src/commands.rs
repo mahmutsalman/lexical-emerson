@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use base64::{engine::general_purpose, Engine as _};
 use serde::Serialize;
 use tauri::{
@@ -7,7 +9,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::projects::folder_basename;
 use crate::store::{Bucket, Note, NoteSummary, Project};
-use crate::AppState;
+use crate::{AppState, PtyTerminalInfo};
 
 #[derive(Serialize)]
 pub struct DirEntry {
@@ -64,19 +66,64 @@ pub fn list_directory(path: String, show_hidden: Option<bool>) -> Result<Vec<Dir
     Ok(out)
 }
 
-#[tauri::command]
+// Spawn a PTY and (if project info is provided) atomically register it in
+// the global terminal registry. Auto-registering on spawn is more robust
+// than a separate frontend call — the only way a PTY can exist without an
+// entry now is if the caller explicitly omitted project info.
+#[tauri::command(rename_all = "camelCase")]
 pub fn open_terminal(
+    app: AppHandle,
     state: State<AppState>,
     cwd: String,
     cols: u16,
     rows: u16,
+    project_id: Option<i64>,
+    project_path: Option<String>,
 ) -> Result<String, String> {
-    state
+    // Stderr-trace the deserialized values. With this surfaced, the
+    // workspace's "registry 0" symptom can be diagnosed end-to-end when
+    // the app is launched from a terminal — if the values arrive None we
+    // know the bug is in JS-side serialization; if they arrive Some(...)
+    // but the registry stays empty we know the bug is elsewhere.
+    eprintln!(
+        "[open_terminal] cwd={:?} project_id={:?} project_path={:?}",
+        cwd, project_id, project_path
+    );
+    let pty_id = state
         .pty_manager
         .lock()
         .map_err(|e| e.to_string())?
         .spawn(&cwd, None, cols, rows)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if let (Some(pid), Some(ppath)) = (project_id, project_path) {
+        {
+            let mut reg = state
+                .pty_registry
+                .lock()
+                .map_err(|e| e.to_string())?;
+            reg.insert(
+                pty_id.clone(),
+                PtyTerminalInfo {
+                    pty_id: pty_id.clone(),
+                    project_id: pid,
+                    project_path: ppath,
+                    title: None,
+                },
+            );
+            eprintln!(
+                "[open_terminal] inserted into registry; size={}",
+                reg.len()
+            );
+        }
+        let _ = app.emit("terminals://changed", ());
+    } else {
+        eprintln!(
+            "[open_terminal] SKIPPED registry insert — project info missing"
+        );
+    }
+
+    Ok(pty_id)
 }
 
 #[tauri::command]
@@ -504,6 +551,204 @@ pub fn save_note_image(
     let abs = dir.join(&filename);
     std::fs::write(&abs, &bytes).map_err(|e| format!("write: {e}"))?;
     Ok(format!("notes/{filename}"))
+}
+
+// --- terminal registry & bucket workspace window --------------------------
+
+// Register a PTY session against its owning project. Called by frontends
+// immediately after a successful open_terminal so the Bucket Workspace can
+// later discover and attach to live terminals across a bucket.
+#[tauri::command(rename_all = "camelCase")]
+pub fn register_terminal(
+    app: AppHandle,
+    state: State<AppState>,
+    pty_id: String,
+    project_id: i64,
+    project_path: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    eprintln!(
+        "[register_terminal] pty_id={} project_id={} project_path={}",
+        pty_id, project_id, project_path
+    );
+    {
+        let mut reg = state
+            .pty_registry
+            .lock()
+            .map_err(|e| e.to_string())?;
+        reg.insert(
+            pty_id.clone(),
+            PtyTerminalInfo {
+                pty_id,
+                project_id,
+                project_path,
+                title,
+            },
+        );
+        eprintln!(
+            "[register_terminal] registry size now {}",
+            reg.len()
+        );
+    }
+    let _ = app.emit("terminals://changed", ());
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn unregister_terminal(
+    app: AppHandle,
+    state: State<AppState>,
+    pty_id: String,
+) -> Result<(), String> {
+    let removed = {
+        let mut reg = state
+            .pty_registry
+            .lock()
+            .map_err(|e| e.to_string())?;
+        reg.remove(&pty_id).is_some()
+    };
+    if removed {
+        let _ = app.emit("terminals://changed", ());
+    }
+    Ok(())
+}
+
+// Debug helper: dump the entire registry without bucket filtering. Used by
+// the workspace's diagnostic UI to verify that per-project windows are
+// actually registering their PTYs (vs. registration silently failing).
+#[tauri::command]
+pub fn list_all_registered_terminals(
+    state: State<AppState>,
+) -> Result<Vec<PtyTerminalInfo>, String> {
+    let reg = state
+        .pty_registry
+        .lock()
+        .map_err(|e| e.to_string())?;
+    let out: Vec<PtyTerminalInfo> = reg.values().cloned().collect();
+    eprintln!(
+        "[list_all_registered_terminals] returning {} entries",
+        out.len()
+    );
+    Ok(out)
+}
+
+// Debug-only: insert a known fake entry into the registry. Lets the user
+// verify that the registry READ path (list_all_registered_terminals,
+// list_terminals_for_bucket, terminals://changed broadcast) is healthy in
+// isolation from the spawn path. If THIS shows up in the workspace,
+// the bug is in open_terminal's project_id arrival, not in the
+// registry/read side.
+#[tauri::command(rename_all = "camelCase")]
+pub fn debug_insert_fake_registry_entry(
+    app: AppHandle,
+    state: State<AppState>,
+    project_id: i64,
+    project_path: String,
+) -> Result<String, String> {
+    let pty_id = format!("debug-{}", uuid::Uuid::new_v4());
+    eprintln!(
+        "[debug_insert_fake] project_id={} project_path={}",
+        project_id, project_path
+    );
+    {
+        let mut reg = state
+            .pty_registry
+            .lock()
+            .map_err(|e| e.to_string())?;
+        reg.insert(
+            pty_id.clone(),
+            PtyTerminalInfo {
+                pty_id: pty_id.clone(),
+                project_id,
+                project_path,
+                title: Some("DEBUG fake".to_string()),
+            },
+        );
+    }
+    let _ = app.emit("terminals://changed", ());
+    Ok(pty_id)
+}
+
+// Re-broadcast terminals://changed so any window listening for registry
+// updates (the workspace) re-reconciles. The frontend invokes this from a
+// "Re-scan terminals" button in the workspace so the user can manually
+// resync without restarting the app.
+#[tauri::command]
+pub fn rescan_terminals(app: AppHandle) -> Result<(), String> {
+    let _ = app.emit("terminals://rescan-request", ());
+    let _ = app.emit("terminals://changed", ());
+    Ok(())
+}
+
+// List live terminals for every project in `bucket_id`. Used by the Bucket
+// Workspace window on mount and on every terminals://changed broadcast to
+// reconcile its tab list against the actual PTY set.
+#[tauri::command(rename_all = "camelCase")]
+pub fn list_terminals_for_bucket(
+    state: State<AppState>,
+    bucket_id: i64,
+) -> Result<Vec<PtyTerminalInfo>, String> {
+    let bucket = state
+        .store
+        .get_bucket(bucket_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "bucket not found".to_string())?;
+    let project_ids: HashSet<i64> = bucket.projects.iter().map(|p| p.id).collect();
+    let reg = state
+        .pty_registry
+        .lock()
+        .map_err(|e| e.to_string())?;
+    let out: Vec<PtyTerminalInfo> = reg
+        .values()
+        .filter(|t| project_ids.contains(&t.project_id))
+        .cloned()
+        .collect();
+    eprintln!(
+        "[list_terminals_for_bucket] bucket_id={} bucket_project_ids={:?} registry_size={} matching={}",
+        bucket_id,
+        project_ids,
+        reg.len(),
+        out.len()
+    );
+    Ok(out)
+}
+
+// Open (or focus, if already present) the dedicated Bucket Workspace window
+// for the given bucket. Window label format: `bucket-3d-<id>`. Modelled on
+// spawn_or_focus_project_window so the routing logic in App.tsx can detect
+// the kind by label prefix.
+#[tauri::command(rename_all = "camelCase")]
+pub fn spawn_bucket_3d_workspace(
+    app: AppHandle,
+    state: State<AppState>,
+    bucket_id: i64,
+) -> Result<(), String> {
+    let bucket = state
+        .store
+        .get_bucket(bucket_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "bucket not found".to_string())?;
+    let label = format!("bucket-3d-{}", bucket_id);
+    if let Some(existing) = app.get_webview_window(&label) {
+        existing.show().map_err(|e| e.to_string())?;
+        existing.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let title = format!("Workspace — {}", bucket.name);
+    let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
+        .title(title)
+        .title_bar_style(TitleBarStyle::Transparent)
+        .hidden_title(true)
+        .inner_size(1400.0, 900.0)
+        .min_inner_size(900.0, 600.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    // Explicit focus so menu accelerators (⌘⌥3 etc.) route here instead
+    // of staying with the launcher / project window the user opened the
+    // workspace from. Tauri's default focus-on-create is unreliable on
+    // macOS when the parent window held keyboard focus.
+    window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // Resolve a relative path stored in a note's Delta back to an absolute

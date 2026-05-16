@@ -198,6 +198,20 @@ pub fn install_event_forwarder(app: AppHandle) {
                     }
                 }
                 PtyMessage::Exit { session_id, exit_code } => {
+                    // Drop the registry entry first so any window listening
+                    // on terminals://changed sees a consistent post-exit
+                    // state when it reconciles.
+                    let state = app.state::<crate::AppState>();
+                    let removed = match state.pty_registry.lock() {
+                        Ok(mut reg) => reg.remove(&session_id).is_some(),
+                        Err(e) => {
+                            log::warn!("pty_registry mutex poisoned on exit: {e}");
+                            false
+                        }
+                    };
+                    if removed {
+                        let _ = app.emit("terminals://changed", ());
+                    }
                     let payload = PtyExitEvent {
                         session_id,
                         exit_code,

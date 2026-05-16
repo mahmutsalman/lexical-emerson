@@ -9,11 +9,15 @@ import {
   Show,
 } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import {
+  getCurrentWebviewWindow,
+  WebviewWindow,
+} from "@tauri-apps/api/webviewWindow";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { BucketBar } from "./components/BucketBar";
 import { BucketsList } from "./components/BucketsList";
+import { BucketWorkspace } from "./components/BucketWorkspace";
 import { FileTree } from "./components/FileTree";
 import { NotesModal } from "./components/NotesModal";
 import { ProjectColorPicker } from "./components/ProjectColorPicker";
@@ -50,11 +54,16 @@ function clampZoom(z: number): number {
 
 export const App: Component = () => {
   const [windowLabel, setWindowLabel] = createSignal<string>("main");
+  const [bucketWorkspaceId, setBucketWorkspaceId] = createSignal<number | null>(
+    null,
+  );
   const [currentProject, setCurrentProject] = createSignal<Project | null>(null);
   const [recentsKey, setRecentsKey] = createSignal(0);
   const [bucketsKey, setBucketsKey] = createSignal(0);
   const [panelsHidden, setPanelsHidden] = createSignal(false);
   const [zoom, setZoom] = createSignal(1);
+
+  const isBucketWorkspace = () => bucketWorkspaceId() !== null;
 
   // Persisted with a small debounce so holding ⌘= or ⌘- doesn't fire a write
   // per keystroke. Fire-and-forget; if the window closes before the timer
@@ -182,6 +191,11 @@ export const App: Component = () => {
           console.error("getProjectById failed:", err);
         }
       }
+    } else if (label.startsWith("bucket-3d-")) {
+      const id = parseInt(label.slice("bucket-3d-".length), 10);
+      if (Number.isFinite(id)) {
+        setBucketWorkspaceId(id);
+      }
     }
 
     unlistenFocus = await getCurrentWindow().onFocusChanged((event) => {
@@ -276,11 +290,47 @@ export const App: Component = () => {
   const projectName = () => currentProject()?.name ?? null;
 
   return (
+    <Show
+      when={!isBucketWorkspace()}
+      fallback={
+        <div class="app-shell bucket-workspace-shell">
+          <header class="title-bar">
+            <span class="title-bar-text">Workspace</span>
+          </header>
+          <BucketWorkspace bucketId={bucketWorkspaceId()!} />
+        </div>
+      }
+    >
     <div class="app-shell" classList={{ "panels-hidden": panelsHidden() }}>
       <header class="title-bar">
         <span class="title-bar-text">
           Lexical Emerson{projectName() ? ` — ${projectName()}` : ""}
         </span>
+        <Show when={currentProject()}>
+          <button
+            type="button"
+            class="title-bar-notes-btn"
+            title="Open notes (⌘⇧N)"
+            aria-label="Open notes"
+            onClick={() => {
+              void getCurrentWebviewWindow().emit("menu://notes-open");
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.25"
+            >
+              <path d="M4 2.5h6.5L13 5v8.5H4z" />
+              <path d="M10 2.5V5h3" />
+              <line x1="6" y1="7.5" x2="11" y2="7.5" />
+              <line x1="6" y1="10" x2="11" y2="10" />
+            </svg>
+          </button>
+        </Show>
       </header>
       <button
         type="button"
@@ -370,7 +420,7 @@ export const App: Component = () => {
       </aside>
 
       <Show
-        when={projectPath()}
+        when={currentProject()}
         fallback={
           <div class="workspace" style={{ "grid-template-columns": "1fr" }}>
             <div class="empty-state">
@@ -384,15 +434,16 @@ export const App: Component = () => {
           </div>
         }
       >
-        {(path) => (
+        {(proj) => (
           <div class="workspace">
             <div class="file-tree-panel">
-              <FileTree rootPath={path()} />
+              <FileTree rootPath={proj().path} />
             </div>
             <div class="terminal-panel">
               <TerminalsView
-                cwd={path()}
-                projectPath={path()}
+                cwd={proj().path}
+                projectPath={proj().path}
+                projectId={proj().id}
                 zoom={zoom}
                 accent={terminalAccent}
               />
@@ -415,5 +466,6 @@ export const App: Component = () => {
         {(proj) => <NotesModal projectId={proj().id} />}
       </Show>
     </div>
+    </Show>
   );
 };

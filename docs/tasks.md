@@ -1,43 +1,42 @@
-# Tasks — Current Slice (M5)
+# Tasks — No active slice
 
 > Regenerated each milestone from `plan.md` + recent ADRs. Do not edit by hand long-term — rewrite at slice boundaries.
 
-## Slice: M5 — Polish + ad-hoc-signed release build
+## Status: M7 closed 2026-05-16
 
-**Exit criteria** (all must hit):
+M7 (Bucket Workspace) shipped today. No new slice is active.
 
-1. Project folder renamed `DevelopmentEnvironment` → `lexical-emerson`. Methodology flag dir moved correspondingly.
-2. Refined LE-monogram icon replaces the placeholder.
-3. README expanded with: what it is, why (RAM comparison), install instructions, the 4 main shortcuts (⌘P, ⌘T, ⌘J, ⌘⇧B), screenshots placeholder note.
-4. About dialog metadata refreshed (version, copyright already wired via `AboutMetadataBuilder`).
-5. `npm run tauri build` produces a working `.app` at `src-tauri/target/release/bundle/macos/Lexical Emerson.app`.
-6. The release `.app` launches outside dev, runs through smoke test: pick folder, terminal works, recents persist, ⌘P, ⌘T tabs, ⌘J bucket cycle.
-7. RAM measurement on release build, captured in STATUS.
+The user said the workspace "works" and "looks good right now" with optional
+style polish noted for later. STATUS.md → "Next Concrete Action" lists those
+polish items.
 
-### Tasks
+## Candidate next slices (pick one when ready)
 
-- [x] Rename folder + methodology flag dir
-- [x] Write `ADR-0008-release-process.md`
-- [x] Update `plan.md` + `tasks.md`
-- [ ] Generate refined LE-monogram icon (1024×1024 source PNG, run `npx tauri icon`)
-- [ ] Expand README with install instructions + shortcut reference
-- [ ] About dialog: confirm AboutMetadataBuilder fields are current
-- [ ] `npm run tauri build` (release build)
-- [ ] Smoke test the bundled `.app` (drag to `/Applications`, launch, run through M1-M4 features)
-- [ ] Measure release-build RAM via `ps -axm | grep -i lexical`
-- [ ] Commit M5
+### Option A — M7.1 polish (1–2 hours)
+- Tighten 3D ring visuals (current dim non-active rings + box-shadow can read
+  as cluttered)
+- Carry per-project accent colour into the 3D pane border for at-a-glance
+  project identification
+- Decide fate of the header **Debug** toggle — remove, hide behind a
+  shortcut, or leave as-is
 
-### Definition of done
+### Option B — v0.2 candidates (each ~1 day)
+- Notarization + GitHub Release with prebuilt DMG (ADR-0008 deferred this;
+  reactivate if external users ask)
+- Linux + Windows builds
+- Per-project shell override (currently uses `$SHELL`, falls back to `/bin/zsh`)
+- Dotfile visibility toggle (⌘.)
+- Split-pane terminals (two terminals side by side in one project window —
+  distinct from M2's stacked tabs)
 
-All exit criteria met; commit "M5 — polish + ad-hoc-signed release build"; update `docs/STATUS.md` with v0.1.0-ready status. After M5 lands locally, GitHub push and notarization remain as future v0.1.1 / v0.2 work whenever the user decides.
+### Option C — Workspace-session persistence
+- Workspace-owned terminals currently die with the app process. A small
+  session-snapshot layer (last-active workspace bucket + which `+` terminals
+  it had open) would let the workspace boot back to where the user left it.
+- Open question in `docs/STATUS.md` and the M7 handoff.
 
-### Out of scope for this slice (explicitly deferred)
+## When picking a slice
 
-- GitHub remote creation and push (user will do later).
-- Code-signing with Developer ID.
-- Notarization with Apple notary service.
-- DMG packaging.
-- CI workflow (`.github/workflows/build.yml`).
-- Auto-update.
-
-See ADR-0008 for the reasoning.
+1. Update `docs/plan.md` "Active slice" line.
+2. Rewrite this file with the new slice's exit criteria + task list.
+3. Use `/checkpoint` at session ends, `/where-am-i` at session starts.

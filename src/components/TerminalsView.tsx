@@ -11,12 +11,19 @@ import type { Accessor } from "solid-js";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
-import { markActive, onMenuEvent } from "../lib/ipc";
+import {
+  markActive,
+  onMenuEvent,
+  onRescanRequest,
+  registerTerminal,
+  unregisterTerminal,
+} from "../lib/ipc";
 
 interface Tab {
   id: string;
   cwd: string;
   projectPath: string;
+  projectId: number;
 }
 
 let tabCounter = 0;
@@ -25,6 +32,7 @@ const newTabId = () => `tab-${++tabCounter}`;
 export interface TerminalsViewProps {
   cwd: string;
   projectPath: string;
+  projectId: number;
   zoom?: Accessor<number>;
   accent?: Accessor<string | null>;
 }
@@ -34,6 +42,14 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   // backing PTYs stay alive as long as the entry stays in this array — the
   // user owns the lifecycle by closing tabs explicitly.
   const [allTabs, setAllTabs] = createSignal<Tab[]>([]);
+  // PTY session id per Tab.id. Kept OUT of the Tab object on purpose:
+  // mutating Tab post-creation would replace its reference, which makes
+  // Solid's <For> reconcile it as remove+insert and tear down + recreate
+  // the underlying TerminalPane (xterm + PTY). Keeping ids in a sidecar
+  // signal lets us record the session id without touching Tab identity.
+  const [sessionIdByTab, setSessionIdByTab] = createSignal<
+    Record<string, string>
+  >({});
   const [activeByProject, setActiveByProject] = createSignal<
     Record<string, string>
   >({});
@@ -107,15 +123,52 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       id: newTabId(),
       cwd: cwd ?? props.cwd,
       projectPath: props.projectPath,
+      projectId: props.projectId,
     };
     setAllTabs((prev) => [...prev, tab]);
     setActiveForCurrent(tab.id);
+  };
+
+  // Called by TerminalPane once a fresh PTY spawns. Records the session id
+  // in a sidecar signal (NOT in the Tab object — see comment on
+  // sessionIdByTab above) and registers it with the global terminal
+  // registry so other windows (the Bucket Workspace) can discover it.
+  const handlePaneSpawned = (tabId: string, sessionId: string) => {
+    setSessionIdByTab((prev) => ({ ...prev, [tabId]: sessionId }));
+    const tab = allTabs().find((t) => t.id === tabId);
+    if (!tab) {
+      console.warn("[TerminalsView] handlePaneSpawned: tab not found", tabId);
+      return;
+    }
+    console.info("[TerminalsView] registering", {
+      sessionId,
+      projectId: tab.projectId,
+      projectPath: tab.projectPath,
+    });
+    registerTerminal(sessionId, tab.projectId, tab.projectPath, null)
+      .then(() => console.info("[TerminalsView] register OK", sessionId))
+      .catch((err) =>
+        console.warn("[TerminalsView] registerTerminal failed:", err),
+      );
   };
 
   const closeTerminal = (id: string) => {
     const tab = allTabs().find((t) => t.id === id);
     if (!tab) return;
     handles.delete(id);
+    const sid = sessionIdByTab()[id];
+    if (sid) {
+      // Unregister first so the global registry doesn't briefly point at a
+      // PTY whose UI is already gone. PtyMessage::Exit will re-emit but the
+      // remove is idempotent. TerminalPane's onCleanup calls closeTerminal
+      // RPC for us, so we don't need to kill the PTY directly here.
+      unregisterTerminal(sid).catch(() => {});
+    }
+    setSessionIdByTab((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     setAllTabs((prev) => prev.filter((t) => t.id !== id));
 
     // Re-select within the project the closed tab belonged to.
@@ -215,6 +268,20 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
           ...prev,
           [props.projectPath]: !prev[props.projectPath],
         }));
+      }),
+      // When the workspace asks every window to re-register their PTYs,
+      // walk our own session map and re-call registerTerminal. Catches
+      // terminals that were spawned before the registry shipped, or that
+      // missed registration for any other reason.
+      onRescanRequest(() => {
+        const sids = sessionIdByTab();
+        for (const tab of allTabs()) {
+          const sid = sids[tab.id];
+          if (!sid) continue;
+          registerTerminal(sid, tab.projectId, tab.projectPath, null).catch(
+            (err) => console.warn("rescan register failed:", err),
+          );
+        }
       }),
     ]);
 
@@ -342,8 +409,11 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
                 >
                   <TerminalPane
                     cwd={tab.cwd}
+                    projectId={tab.projectId}
+                    projectPath={tab.projectPath}
                     onReady={(h) => handles.set(tab.id, h)}
                     onActivity={markActivityForCurrent}
+                    onSpawned={(sid) => handlePaneSpawned(tab.id, sid)}
                     zoom={props.zoom}
                     accent={props.accent}
                   />

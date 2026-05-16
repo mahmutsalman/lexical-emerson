@@ -1,0 +1,365 @@
+/* Bucket Workspace — a dedicated cross-project window with a default 2D
+   grouped-tab-strip view and a 3D stacked-arcs immersive mode. Pairs with
+   src/components/BucketWorkspace.tsx. */
+
+/* The outer shell: only the title bar above; the workspace fills the rest. */
+.app-shell.bucket-workspace-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+.bucket-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0a0a0c;
+  color: #e8e8ea;
+}
+
+.bw-loading,
+.bw-empty {
+  padding: 32px;
+  color: #9a9aa3;
+  font-size: 13px;
+  text-align: center;
+}
+
+.bw-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bucket-workspace.mode-3d .bw-header {
+  background: #1d2a3f;
+  border-bottom-color: rgba(120, 180, 255, 0.3);
+}
+
+.bw-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.bw-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #b8b8bf;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.bw-mode-badge.is-3d {
+  background: #2d5cc8;
+  color: #ffffff;
+}
+
+.bw-hint {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: #6f6f78;
+}
+
+.bw-rescan-btn,
+.bw-mode-toggle-btn {
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  color: #c8c8d0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.bw-rescan-btn:hover,
+.bw-mode-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+
+/* --- Debug strip -------------------------------------------------------- */
+
+.bw-debug {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  background: #181822;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  color: #c8c8d0;
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+}
+
+.bw-debug-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.bw-debug-head > span {
+  flex: 1 1 auto;
+}
+
+.bw-debug-empty {
+  color: #ff8a8a;
+  font-size: 11px;
+  padding: 6px 0;
+  white-space: pre-wrap;
+}
+
+.bw-debug-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.bw-debug-list li {
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.bw-debug-list code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-right: 6px;
+}
+
+/* --- 2D grouped tab strip ------------------------------------------------ */
+
+.bw-tabstrip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  max-height: 36vh;
+  overflow-y: auto;
+}
+
+.bucket-workspace.mode-3d .bw-tabstrip {
+  display: none;
+}
+
+.bw-tabrow {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.bw-tabrow.active {
+  background: rgba(255, 255, 255, 0.05);
+  border-left-color: rgba(255, 255, 255, 0.35);
+}
+
+.bw-row-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #d6d6dc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bw-row-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.bw-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: #1a1a1f;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  color: #b8b8bf;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.bw-tab.active {
+  background: #2a2a32;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.bw-tab:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.bw-tab-num {
+  opacity: 0.65;
+}
+
+.bw-tab-host {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.bw-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  color: #888892;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.bw-tab-close:hover {
+  background: rgba(255, 70, 70, 0.18);
+  color: #ff8a8a;
+}
+
+.bw-tab-add {
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  color: #888892;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bw-tab-add:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #d6d6dc;
+}
+
+/* --- Terminal stack (shared by 2D and 3D) -------------------------------- */
+
+.bw-stack {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #0e0e10;
+}
+
+.bw-rings {
+  position: absolute;
+  inset: 0;
+  /* 2D mode: rings stack but only the active one is visible (others are
+     filtered to display:none via the per-pane style block). */
+}
+
+.bw-rings.is-3d {
+  transform-style: preserve-3d;
+  transition: transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+.bw-ring {
+  position: absolute;
+  inset: 0;
+}
+
+.bw-rings.is-3d .bw-ring {
+  transform-style: preserve-3d;
+  transition: transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+  /* Default to pointer-events: none so clicks fall through inactive rings
+     to whichever element actually owns them. The active ring re-enables
+     events for itself below. Without this, an inactive ring's empty box
+     overlaps the active ring's pane in the lower half of the stack and
+     captures the click, leaving xterm without keyboard focus and the
+     PTY without input. */
+  pointer-events: none;
+}
+
+.bw-rings.is-3d .bw-ring.is-active {
+  pointer-events: auto;
+  /* Paint on top of any inactive rings that overlap visually. Inactive
+     rings' translateY positions them outside the active ring's box, but
+     their box-model dimensions still cover the full stack, and later
+     siblings paint on top by default — z-index forces the active ring
+     up in the stacking order. */
+  z-index: 5;
+}
+
+.bw-cylinder {
+  position: absolute;
+  inset: 0;
+}
+
+.bw-cylinder.is-3d {
+  transform-style: preserve-3d;
+  transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+.bw-pane {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  background: #0e0e10;
+  /* Match the per-project .terminal-host's defensive zoom: 1 — keeps
+     xterm's mouse coords in sync with getBoundingClientRect(). */
+  zoom: 1;
+}
+
+.bw-pane.is-3d {
+  inset: 0 19%;
+  display: flex;
+  backface-visibility: hidden;
+  pointer-events: none;
+  opacity: 0.55;
+  transition: opacity 220ms ease,
+              transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform, opacity;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.bw-pane.is-3d.is-facing {
+  pointer-events: auto;
+  opacity: 1;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25),
+              0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Non-active rings dim further so the active one reads clearly. */
+.bw-ring:not(.is-active) .bw-pane.is-3d {
+  opacity: 0.28;
+}
+
+/* xterm hosts inside panes fill the box. Mirrors `.terminal-host .xterm`
+   from the proven per-project view: flex:1 + min-height:0 lets the canvas
+   grow with the flex column without overflowing parent height. */
+.bw-pane .xterm {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  zoom: 1;
+}
+
+.bw-pane.is-3d .xterm {
+  padding: 0;
+}

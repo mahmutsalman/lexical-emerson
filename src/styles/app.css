@@ -28,6 +28,28 @@
   text-overflow: ellipsis;
 }
 
+.title-bar-notes-btn {
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  opacity: 0.75;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.title-bar-notes-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
+}
+
 .app-shell.panels-hidden {
   grid-template-columns: 1fr;
 }

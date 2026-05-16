@@ -12,7 +12,7 @@ default-run = "lexical-emerson"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0", features = ["macos-private-api", "protocol-asset"] }
+tauri = { version = "2.0", features = ["macos-private-api", "protocol-asset", "devtools"] }
 tauri-plugin-dialog = "2.0"
 
 serde = { version = "1.0", features = ["derive"] }

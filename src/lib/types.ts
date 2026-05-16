@@ -44,3 +44,10 @@ export interface Note extends NoteSummary {
   content_json: string;
   created_at: string;
 }
+
+export interface PtyTerminalInfo {
+  pty_id: string;
+  project_id: number;
+  project_path: string;
+  title: string | null;
+}

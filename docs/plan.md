@@ -34,14 +34,23 @@ Not an IDE in the Monaco/LSP sense. The terminal is the editor (because Claude C
 | **M4** | Buckets (the killer feature) | `Cmd+J` cycles bucket ring across windows; persists cursor; sidebar bucket management | 2–3 days |
 | **M5** | Polish + ad-hoc-signed release build | Release `.app` launches outside dev, all M1-M4 features work, GitHub push deferred | 1 day |
 | **M6** | Per-project notes (Quill + image paste) | `Cmd+Shift+N` opens a per-project notes modal with rich text + clipboard-image-paste + captions, persisted in SQLite | 1 day |
+| **M7** | Bucket Workspace (cross-project terminal aggregator + 3D arc view) | Right-click bucket → "Open in 3D Workspace" spawns a `bucket-3d-<id>` window aggregating live terminals across every project in the bucket; 2D grouped tab strip default, ⌘⌥3 toggles 3D stacked-arcs view; `+` per row spawns a workspace-owned terminal in that project | 1 day |
 
 Each milestone is **independently usable**. Stop after any one and still have a useful tool.
 
 ## Active slice
 
-**Current: M6 — Per-project notes.**
+**Current: M7 — Bucket Workspace shipped 2026-05-16.**
 
-See `docs/tasks.md` for M6's working tasks.
+M7 is complete: PTY registry (`AppState.pty_registry`), atomic registration on
+`open_terminal`, `bucket-3d-<id>` window kind, 2D + 3D view modes. Surfaced and
+fixed a load-bearing Tauri v2 ACL gotcha — see ADR-0010. Every new window
+label family must be added to `capabilities/default.json::windows` or `listen()`
+silently fails with an "Unhandled Promise Rejection: Command plugin:event|listen
+not allowed by ACL". Production devtools enabled to surface that class of error
+in future.
+
+M6 is complete: per-project notes (Quill + image paste) — see ADR-0009.
 
 M4 is complete (commit `43825bb`): buckets — schema, sidebar UI, footer cycle bar, `⌘J` / `⌘⇧J` cycle hotkeys, app-wide active bucket persisted.
 
@@ -65,6 +74,7 @@ See `docs/ADRs/` for the load-bearing choices:
 - ADR-0007 — Bucket model: ordered ring with persisted cursor
 - ADR-0008 — Release process for v0.1 (ad-hoc-signed, no notarization)
 - ADR-0009 — Quill.js for the project notes editor
+- ADR-0010 — Bucket Workspace + Tauri v2 ACL window-scoping gotcha
 
 ## Predicted gotchas (mitigations baked into M1)
 

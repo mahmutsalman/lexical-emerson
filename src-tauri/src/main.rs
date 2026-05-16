@@ -6,13 +6,23 @@ mod projects;
 mod pty;
 mod store;
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
+use serde::{Deserialize, Serialize};
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Emitter, EventTarget, Manager};
 
 use pty::PtyManager;
 use store::Store;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct PtyTerminalInfo {
+    pub pty_id: String,
+    pub project_id: i64,
+    pub project_path: String,
+    pub title: Option<String>,
+}
 
 pub struct AppState {
     pub pty_manager: Mutex<PtyManager>,
@@ -22,6 +32,12 @@ pub struct AppState {
     // so that opening a project that's ALREADY visible in main focuses main
     // rather than creating a duplicate project-N window.
     pub main_project_id: Mutex<Option<i64>>,
+    // Live PTY registry keyed by session_id. Source of truth for "what
+    // terminals are running, in which project?" — populated by frontends via
+    // register_terminal as they spawn, drained on PtyMessage::Exit and on
+    // explicit unregister. The Bucket Workspace window queries this to
+    // discover and attach to existing PTYs across all projects in a bucket.
+    pub pty_registry: Mutex<HashMap<String, PtyTerminalInfo>>,
 }
 
 fn main() {
@@ -69,6 +85,13 @@ fn main() {
             commands::set_note_title,
             commands::save_note_image,
             commands::resolve_note_image,
+            commands::register_terminal,
+            commands::unregister_terminal,
+            commands::list_terminals_for_bucket,
+            commands::list_all_registered_terminals,
+            commands::rescan_terminals,
+            commands::spawn_bucket_3d_workspace,
+            commands::debug_insert_fake_registry_entry,
         ])
         .setup(|app| {
             let app_data = app
@@ -82,6 +105,7 @@ fn main() {
                 pty_manager: Mutex::new(PtyManager::new()),
                 store,
                 main_project_id: Mutex::new(None),
+                pty_registry: Mutex::new(HashMap::new()),
             });
 
             let handle = app.handle().clone();
@@ -116,6 +140,8 @@ fn main() {
                 // so typing always follows the visible centred terminal.
                 "terminal_rotate_left" => "menu://terminal-prev",
                 "terminal_rotate_right" => "menu://terminal-next",
+                "bucket_3d_ring_prev" => "menu://bucket-3d-ring-prev",
+                "bucket_3d_ring_next" => "menu://bucket-3d-ring-next",
                 "go_quick_switcher" => "menu://quick-switcher",
                 "bucket_next" => "menu://bucket-next",
                 "bucket_prev" => "menu://bucket-prev",
@@ -249,6 +275,14 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         MenuItemBuilder::with_id("terminal_rotate_right", "Next Terminal (Arrow)")
             .accelerator("CmdOrCtrl+Alt+Right")
             .build(app)?;
+    let bucket_3d_ring_prev =
+        MenuItemBuilder::with_id("bucket_3d_ring_prev", "Previous Project Ring")
+            .accelerator("CmdOrCtrl+Alt+Up")
+            .build(app)?;
+    let bucket_3d_ring_next =
+        MenuItemBuilder::with_id("bucket_3d_ring_next", "Next Project Ring")
+            .accelerator("CmdOrCtrl+Alt+Down")
+            .build(app)?;
 
     let terminal_submenu = SubmenuBuilder::new(app, "Terminal")
         .item(&terminal_new)
@@ -260,6 +294,9 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .item(&terminal_3d)
         .item(&terminal_rotate_left)
         .item(&terminal_rotate_right)
+        .separator()
+        .item(&bucket_3d_ring_prev)
+        .item(&bucket_3d_ring_next)
         .build()?;
 
     let zoom_in = MenuItemBuilder::with_id("zoom_in", "Zoom In")

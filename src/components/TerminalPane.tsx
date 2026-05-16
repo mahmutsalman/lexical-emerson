@@ -21,10 +21,37 @@ import {
 export interface TerminalHandle {
   focus: () => void;
   scrollLines: (lines: number) => void;
+  // Force xterm to remeasure and resize against the current host element
+  // dimensions. Use this when CSS class changes alter layout in ways that
+  // ResizeObserver doesn't reliably catch (WebKit miss on display:none →
+  // flex transitions, mode-toggle pane width swaps, etc.). The PTY is
+  // resized along with xterm.
+  fitNow: () => void;
 }
 
 export interface TerminalPaneProps {
   cwd: string;
+  // If set, attach to this existing PTY instead of spawning a fresh one.
+  // The Bucket Workspace uses this to render xterm instances bound to PTYs
+  // that other windows (or its own + button) created.
+  sessionId?: string;
+  // Default behaviour depends on mode:
+  //   - spawn mode (sessionId omitted):  closeOnUnmount defaults to true
+  //   - attach mode (sessionId provided): closeOnUnmount defaults to false
+  // The workspace can override either way: pass `closeOnUnmount={true}` for
+  // workspace-owned terminals it wants to clean up on workspace close.
+  closeOnUnmount?: boolean;
+  // Project metadata for spawn-mode terminals. When provided AND we spawn
+  // a new PTY, the Rust side atomically registers it in the global
+  // terminal registry so the workspace can discover it. Optional —
+  // omitting these just means the PTY won't appear in the workspace
+  // unless it's registered some other way.
+  projectId?: number;
+  projectPath?: string;
+  // Fires when this pane spawned a fresh PTY (spawn mode only). Lets the
+  // parent record the session_id even though Rust already did the
+  // registry write — handy for sidecar tracking in the parent.
+  onSpawned?: (sessionId: string) => void;
   onReady?: (handle: TerminalHandle) => void;
   onActivity?: () => void;
   zoom?: Accessor<number>;
@@ -55,8 +82,19 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
   let resizeTimer: number | undefined;
   let zoomRefitTimer: number | undefined;
   let disposed = false;
+  // Capture the "should I kill the PTY on teardown?" decision at mount
+  // time. We CANNOT read it from props inside onCleanup: when a Tauri
+  // window closes, Solid's props proxy is torn down faster than this
+  // component's async setup finishes unwinding, and reads return
+  // undefined — which made the `?? (sessionId === undefined)` fallback
+  // fire for workspace-owned terminals and kill PTYs that the workspace
+  // explicitly asked to keep alive. Snapshot it synchronously and read
+  // the closure variable everywhere instead.
+  let shouldCloseOnTeardown = false;
 
   onMount(async () => {
+    shouldCloseOnTeardown =
+      props.closeOnUnmount ?? (props.sessionId === undefined);
     const initialZoom = props.zoom?.() ?? 1;
     const initialAccent = props.accent?.() ?? null;
     term = new Terminal({
@@ -109,17 +147,46 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
     fitAddon.fit();
     const { cols, rows } = term;
 
-    try {
-      sessionId = await openTerminal(props.cwd, cols, rows);
-    } catch (err) {
-      term.writeln(`\r\n\x1b[31mFailed to open shell: ${err}\x1b[0m`);
-      return;
-    }
-
-    if (disposed) {
-      // The component was unmounted between openTerminal request and reply.
-      await closeTerminal(sessionId);
-      return;
+    if (props.sessionId) {
+      // Attach mode: PTY already exists; just bind to it. Resize to match
+      // our local geometry so the shell wraps correctly in this window.
+      sessionId = props.sessionId;
+      resizeTerminal(sessionId, cols, rows).catch(() => {});
+    } else {
+      // Diagnostic: log the project info we're about to ship to Rust so
+      // that the "registry 0" bug can be observed directly in devtools
+      // (right-click → Inspect). If projectId/projectPath are undefined
+      // or null here, the atomic registration in open_terminal will be
+      // skipped and the workspace will never see this PTY.
+      console.info("[TerminalPane] openTerminal", {
+        cwd: props.cwd,
+        projectId: props.projectId,
+        projectPath: props.projectPath,
+      });
+      try {
+        sessionId = await openTerminal(
+          props.cwd,
+          cols,
+          rows,
+          props.projectId,
+          props.projectPath,
+        );
+        console.info("[TerminalPane] openTerminal OK sessionId=", sessionId);
+      } catch (err) {
+        term.writeln(`\r\n\x1b[31mFailed to open shell: ${err}\x1b[0m`);
+        return;
+      }
+      if (disposed) {
+        // The component was unmounted between openTerminal request and reply.
+        // Only kill the just-spawned PTY if our captured policy says so —
+        // workspace-owned tabs explicitly opt out so a fast click-and-close
+        // doesn't murder the PTY we just registered.
+        if (shouldCloseOnTeardown) {
+          await closeTerminal(sessionId);
+        }
+        return;
+      }
+      props.onSpawned?.(sessionId);
     }
 
     const activeId = sessionId;
@@ -145,9 +212,22 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
       props.onActivity?.();
     });
 
+    const fitNow = () => {
+      if (!term || !fitAddon || !sessionId) return;
+      try {
+        fitAddon.fit();
+        const c = term.cols;
+        const r = term.rows;
+        resizeTerminal(sessionId, c, r).catch(() => {});
+      } catch (err) {
+        console.warn("fitNow failed:", err);
+      }
+    };
+
     props.onReady?.({
       focus: () => term?.focus(),
       scrollLines: (lines: number) => term?.scrollLines(lines),
+      fitNow,
     });
 
     // Debounced resize via ResizeObserver on the container.
@@ -213,7 +293,9 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
     resizeObserver?.disconnect();
     unlistenData?.();
     unlistenExit?.();
-    if (sessionId) {
+    if (sessionId && shouldCloseOnTeardown) {
+      // Decision was snapshotted at mount time so it survives Solid's
+      // parent teardown — see shouldCloseOnTeardown declaration above.
       closeTerminal(sessionId).catch(() => {});
     }
     term?.dispose();
