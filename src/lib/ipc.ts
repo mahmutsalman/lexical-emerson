@@ -177,6 +177,17 @@ export async function reorderBucketProjects(
   await invoke("reorder_bucket_projects", { bucketId, projectIds });
 }
 
+// Make `bucketId` the active bucket AND point its cursor at the given
+// project. Fired alongside requestOpenProject when the user clicks a
+// project row inside an expanded bucket — the project window opens AND
+// the bucket's `at-cursor` highlight follows the click.
+export async function setBucketCursorToProject(
+  bucketId: number,
+  projectId: number,
+): Promise<void> {
+  await invoke("set_bucket_cursor_to_project", { bucketId, projectId });
+}
+
 export async function setActiveBucket(id: number | null): Promise<void> {
   await invoke("set_active_bucket", { id });
 }

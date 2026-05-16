@@ -354,6 +354,53 @@ impl Store {
         Ok(())
     }
 
+    /// Move the bucket's cursor to point at `project_id`. Cursor is a
+    /// 0-based rank into the position-ordered project list (matches
+    /// `load_bucket_projects`'s ORDER BY position ASC), not the
+    /// `position` column itself — positions can be sparse after a
+    /// `remove_from_bucket`, but the cursor in `cycle_active_bucket`
+    /// is bounded by the live project count via modulo, so it's
+    /// always interpreted as a rank.
+    ///
+    /// Returns Err if the project isn't a member of the bucket.
+    pub fn set_bucket_cursor_to_project(
+        &self,
+        bucket_id: i64,
+        project_id: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        // Count members whose position is strictly less than the target —
+        // that count IS the target's 0-based rank. Wrapped in a presence
+        // check so "first project (rank 0)" and "not in bucket (rank 0)"
+        // are disambiguated.
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM bucket_projects
+              WHERE bucket_id = ?1 AND project_id = ?2",
+            params![bucket_id, project_id],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Err(anyhow!(
+                "project {project_id} is not in bucket {bucket_id}"
+            ));
+        }
+        let rank: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM bucket_projects
+              WHERE bucket_id = ?1
+                AND position < (
+                  SELECT position FROM bucket_projects
+                   WHERE bucket_id = ?1 AND project_id = ?2
+                )",
+            params![bucket_id, project_id],
+            |row| row.get(0),
+        )?;
+        conn.execute(
+            "UPDATE buckets SET cursor = ?1 WHERE id = ?2",
+            params![rank, bucket_id],
+        )?;
+        Ok(())
+    }
+
     /// Rewrite the position column for every project in `project_ids` so the
     /// bucket's order matches the slice exactly. Ids absent from the slice
     /// are left untouched — callers are expected to pass the full bucket

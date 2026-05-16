@@ -77,6 +77,7 @@ fn main() {
             commands::remove_from_bucket,
             commands::reorder_bucket_projects,
             commands::set_active_bucket,
+            commands::set_bucket_cursor_to_project,
             commands::get_active_bucket,
             commands::cycle_bucket,
             commands::list_notes,

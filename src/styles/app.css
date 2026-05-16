@@ -567,10 +567,12 @@
   font-size: 11px;
   color: #9a9aa3;
   border-radius: 3px;
+  cursor: pointer;
 }
 
 .bucket-project:hover {
   background: #232328;
+  color: #d6d6dc;
 }
 
 .bucket-project.at-cursor {

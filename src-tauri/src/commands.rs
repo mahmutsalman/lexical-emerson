@@ -417,6 +417,30 @@ pub fn set_active_bucket(
     Ok(())
 }
 
+// Move the bucket's cursor to point at the given project AND make this
+// bucket the active bucket — exactly what should happen when the user
+// clicks a project row in the sidebar's expanded bucket view. Window
+// spawn/focus is the caller's job (separate IPC) so this stays a
+// pure-data update; both actions go out concurrently from the UI.
+#[tauri::command]
+pub fn set_bucket_cursor_to_project(
+    app: AppHandle,
+    state: State<AppState>,
+    bucket_id: i64,
+    project_id: i64,
+) -> Result<(), String> {
+    state
+        .store
+        .set_active_bucket(Some(bucket_id))
+        .map_err(|e| e.to_string())?;
+    state
+        .store
+        .set_bucket_cursor_to_project(bucket_id, project_id)
+        .map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_active_bucket(state: State<AppState>) -> Result<Option<i64>, String> {
     state.store.get_active_bucket().map_err(|e| e.to_string())

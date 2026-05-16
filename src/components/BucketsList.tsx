@@ -15,11 +15,13 @@ import {
   deleteBucket,
   onMenuEvent,
   removeFromBucket,
+  requestOpenProject,
   setActiveBucket,
   setBucketAutoRestore,
+  setBucketCursorToProject,
   spawnBucket3DWorkspace,
 } from "../lib/ipc";
-import type { Bucket } from "../lib/types";
+import type { Bucket, Project } from "../lib/types";
 
 type BucketMenuState = {
   bucket: Bucket;
@@ -240,28 +242,60 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
                 <Show when={isOpen() && bucket.projects.length > 0}>
                   <ul class="bucket-projects">
                     <For each={bucket.projects}>
-                      {(project, idx) => (
-                        <li
-                          class={`bucket-project ${
-                            isActive() && idx() === bucket.cursor ? "at-cursor" : ""
-                          }`}
-                        >
-                          <span class="bucket-project-name">{project.name}</span>
-                          <button
-                            type="button"
-                            class="bucket-action danger"
-                            onClick={() =>
-                              removeFromBucket(bucket.id, project.id).catch(
-                                (err) =>
-                                  console.error("removeFromBucket failed:", err),
-                              )
-                            }
-                            title="Remove from bucket"
+                      {(project, idx) => {
+                        const handleOpen = (p: Project) => {
+                          // Fire both in parallel — opening the window
+                          // and moving the at-cursor highlight are
+                          // independent (no shared state, no ordering
+                          // dependency). The cursor IPC also activates
+                          // this bucket so the .at-cursor styling
+                          // actually paints.
+                          void requestOpenProject(p.path).catch((err) =>
+                            console.error("requestOpenProject failed:", err),
+                          );
+                          void setBucketCursorToProject(bucket.id, p.id).catch(
+                            (err) =>
+                              console.error(
+                                "setBucketCursorToProject failed:",
+                                err,
+                              ),
+                          );
+                        };
+                        return (
+                          <li
+                            class={`bucket-project ${
+                              isActive() && idx() === bucket.cursor
+                                ? "at-cursor"
+                                : ""
+                            }`}
+                            onClick={() => handleOpen(project)}
+                            title={project.path}
                           >
-                            ×
-                          </button>
-                        </li>
-                      )}
+                            <span class="bucket-project-name">
+                              {project.name}
+                            </span>
+                            <button
+                              type="button"
+                              class="bucket-action danger"
+                              onClick={(e) => {
+                                // Don't let the remove click bubble into
+                                // the row's open handler.
+                                e.stopPropagation();
+                                removeFromBucket(bucket.id, project.id).catch(
+                                  (err) =>
+                                    console.error(
+                                      "removeFromBucket failed:",
+                                      err,
+                                    ),
+                                );
+                              }}
+                              title="Remove from bucket"
+                            >
+                              ×
+                            </button>
+                          </li>
+                        );
+                      }}
                     </For>
                   </ul>
                 </Show>
