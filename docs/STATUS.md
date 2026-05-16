@@ -21,6 +21,6 @@ M7 has no remaining known polish items. User has approved each fix as it shipped
 - v0.2 scope: ship-as-is and gather feedback, or fold in Linux/Windows + per-project shell first?
 
 ## Recent Decisions (last 3)
+- ADR-0011 — Pointer-event DnD (solid-dnd) inside CSS-3D ancestors; native HTML5 DnD is off-limits in this codebase
 - ADR-0010 — Bucket Workspace + Tauri v2 ACL window-scoping gotcha (load-bearing: future window labels must update capabilities)
 - ADR-0009 — Quill.js for the project notes editor (M6)
-- ADR-0008 — Release process for v0.1 (ad-hoc-signed, no notarization)
