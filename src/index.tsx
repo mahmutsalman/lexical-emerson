@@ -5,6 +5,7 @@ import "./styles/reset.css";
 import "./styles/app.css";
 import "./styles/notes.css";
 import "./styles/bucket-workspace.css";
+import "./styles/project-notes-rail.css";
 import "@xterm/xterm/css/xterm.css";
 
 import { App } from "./App";

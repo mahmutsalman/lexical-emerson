@@ -10,8 +10,11 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { emit } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
+import { NotesModal } from "./NotesModal";
+import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
 import {
   closeTerminal,
@@ -59,6 +62,12 @@ interface WorkspaceTab {
 
 let tabCounter = 0;
 const newTabId = () => `bw-tab-${++tabCounter}`;
+
+// Sentinel stored in activeByProject when the user has navigated to a
+// project's notes face (slot 0 of the per-project cylinder) rather than
+// any of its terminals. Chosen to be impossible to collide with the
+// `bw-tab-N` ids produced by newTabId().
+const NOTES_SENTINEL = "__notes__";
 
 export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
   const [bucketKey, setBucketKey] = createSignal(0);
@@ -185,16 +194,28 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
         list.push(t);
         byProject.set(t.projectPath, list);
       }
-      for (const [path, arr] of byProject) {
-        const current = nextActive[path];
-        if (!current || !arr.find((t) => t.id === current)) {
-          nextActive[path] = arr[arr.length - 1].id;
+      // Walk every project (not just those with tabs) so projects with
+      // only a notes face (no terminals) still get the sentinel set,
+      // making the notes face navigable as the project's "active" slot.
+      const projectPaths = new Set<string>();
+      for (const p of projects()) {
+        projectPaths.add(p.path);
+        const arr = byProject.get(p.path) ?? [];
+        const current = nextActive[p.path];
+        if (current === NOTES_SENTINEL) continue;
+        if (arr.length === 0) {
+          if (current !== NOTES_SENTINEL) {
+            nextActive[p.path] = NOTES_SENTINEL;
+            activeChanged = true;
+          }
+        } else if (!current || !arr.find((t) => t.id === current)) {
+          nextActive[p.path] = arr[arr.length - 1].id;
           activeChanged = true;
         }
       }
-      // Drop active entries for projects whose tabs all died.
+      // Drop active entries for projects that aren't in the bucket anymore.
       for (const path of Object.keys(prevActive)) {
-        if (!byProject.has(path)) {
+        if (!projectPaths.has(path)) {
           delete nextActive[path];
           activeChanged = true;
         }
@@ -309,6 +330,27 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     const p = activeProject();
     if (!p) return;
     const arr = tabsForProject(p.path);
+    // In 3D mode the cylinder has [notes, t0, t1, ...]; ⌘⌥←/→ cycles
+    // through that whole ring so the notes face is reachable. In 2D mode
+    // the notes face isn't part of the visible carousel, so we keep the
+    // legacy terminals-only cycle to preserve existing muscle memory.
+    if (mode() === "3d") {
+      const total = arr.length + 1;
+      if (total < 2) return;
+      const currentId = activeByProject()[p.path];
+      let currentIdx: number;
+      if (currentId === NOTES_SENTINEL) {
+        currentIdx = 0;
+      } else {
+        const ti = arr.findIndex((t) => t.id === currentId);
+        if (ti < 0) return;
+        currentIdx = ti + 1;
+      }
+      const nextIdx = (currentIdx + delta + total) % total;
+      const nextId = nextIdx === 0 ? NOTES_SENTINEL : arr[nextIdx - 1].id;
+      setActiveForProject(p.path, nextId);
+      return;
+    }
     if (arr.length < 2) return;
     const currentId = activeByProject()[p.path];
     const idx = arr.findIndex((t) => t.id === currentId);
@@ -324,9 +366,11 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
   };
 
   // Ensure activeByProject has a valid selection per project at all times.
-  // When a project's tab list goes empty, drop its entry so the row shows
-  // "empty + only" UI. When a project has tabs but no valid active, default
-  // to the last (most recently added) tab.
+  // When a project has no terminals, default the active slot to the notes
+  // sentinel so the per-project notes face is always reachable as the
+  // ring's "facing" panel — both for the initial empty state and after
+  // the user closes the last terminal. When the user has explicitly
+  // selected notes, leave that selection alone even if terminals exist.
   createEffect(() => {
     const all = tabs();
     const next = { ...activeByProject() };
@@ -334,9 +378,10 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     for (const p of projects()) {
       const arr = all.filter((t) => t.projectPath === p.path);
       const current = next[p.path];
+      if (current === NOTES_SENTINEL) continue;
       if (arr.length === 0) {
-        if (current !== undefined) {
-          delete next[p.path];
+        if (current !== NOTES_SENTINEL) {
+          next[p.path] = NOTES_SENTINEL;
           changed = true;
         }
       } else if (!current || !arr.find((t) => t.id === current)) {
@@ -466,14 +511,24 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     const mid = (n - 1) / 2;
     return Math.max(-6, Math.min(6, (activeProjectIdx() - mid) * 1.5));
   };
+  // Notes face occupies slot 0 of each ring's cylinder; terminal i sits at
+  // slot i+1. Total slot count = arr.length + 1.
   const ringRotationDeg = (projectPath: string) => {
     const arr = tabsForProject(projectPath);
-    const n = arr.length;
+    const n = arr.length + 1;
     if (n < 2) return 0;
     const currentId = activeByProject()[projectPath];
+    if (currentId === NOTES_SENTINEL) {
+      // User has navigated to the notes face — rotate slot 0 to center.
+      return -slotOffsetDeg(0, n);
+    }
     const idx = arr.findIndex((t) => t.id === currentId);
-    if (idx < 0) return 0;
-    return -slotOffsetDeg(idx, n);
+    if (idx < 0) {
+      // No selected terminal: leave the cylinder centered on the notes
+      // face (slot 0) so something readable is always in view.
+      return -slotOffsetDeg(0, n);
+    }
+    return -slotOffsetDeg(idx + 1, n);
   };
 
   return (
@@ -664,6 +719,19 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
             </Show>
           </div>
 
+          {/* Per-project notes side rail. Only mounted in 3D mode — in
+              flat mode the tab strip carries enough chrome already. The
+              rail is absolutely positioned at .bucket-workspace level so
+              it sits OUTSIDE the 3D-transformed .bw-stack subtree and
+              doesn't get rotated or perspective-projected. */}
+          {/* NotesModal scoped to the currently-active project so each
+              ring's Edit button has a target in this workspace window
+              (App.tsx's modal only mounts when there's a currentProject,
+              which the bucket-workspace window doesn't set). */}
+          <Show when={activeProject()}>
+            {(proj) => <NotesModal projectId={proj().id} />}
+          </Show>
+
           {/* Terminal panes. Always all rendered, with display managed by
               the per-tab style block below so xterm instances don't get
               torn down when switching tabs. The 3D mode wraps each
@@ -683,7 +751,18 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
               style={
                 mode() === "3d"
                   ? {
-                      transform: `translateY(${stackTranslateY()}px) rotateX(${stackTiltDeg()}deg)`,
+                      // Order matters: CSS applies the rightmost transform
+                      // first to a point, so translateY runs before
+                      // rotateX. That puts the active ring at local origin
+                      // BEFORE the rotation, so rotateX(tilt) doesn't
+                      // shift it in z. The previous order
+                      // (translateY ∘ rotateX) left the active ring at
+                      // z = activeIdx * ringHeightPx * sin(tilt) — small
+                      // for the top ring (tilt≈0 there) but growing for
+                      // lower rings, pulling them toward the camera and
+                      // making the terminal appear progressively larger
+                      // as the user navigated down the stack.
+                      transform: `rotateX(${stackTiltDeg()}deg) translateY(${stackTranslateY()}px)`,
                     }
                   : undefined
               }
@@ -711,13 +790,46 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                       <div
                         class={`bw-cylinder ${mode() === "3d" ? "is-3d" : ""}`}
                         style={
-                          mode() === "3d" && arr().length >= 2
+                          // arr.length >= 1 means total slot count
+                          // (terminals + notes) is >= 2 — that's the
+                          // threshold for engaging the cylinder transform.
+                          mode() === "3d" && arr().length >= 1
                             ? {
-                                transform: `translateZ(${-radiusFor(arr().length)}px) rotateY(${ringRotationDeg(p.path)}deg)`,
+                                transform: `translateZ(${-radiusFor(arr().length + 1)}px) rotateY(${ringRotationDeg(p.path)}deg)`,
                               }
                             : undefined
                         }
                       >
+                        {/* Notes face — slot 0 of this ring's cylinder, so
+                            it rotates with the terminals during ⌘⌥←/→.
+                            Per-project: each ring has its own notes face
+                            scoped to that project's id. Active ring's face
+                            is the only one visible (inactive rings are
+                            opacity:0 in the existing CSS). */}
+                        <Show when={mode() === "3d"}>
+                          <div
+                            class={`bw-pane is-3d is-notes ${
+                              ringIsActive() &&
+                              activeByProject()[p.path] === NOTES_SENTINEL
+                                ? "is-facing"
+                                : ""
+                            }`}
+                            style={
+                              {
+                                display: "flex",
+                                transform: `rotateY(${slotOffsetDeg(0, arr().length + 1)}deg) translateZ(${radiusFor(arr().length + 1)}px)`,
+                                "--pane-accent": paneAccent() ?? "",
+                              } as Record<string, string>
+                            }
+                          >
+                            <ProjectNotesPanel
+                              projectId={() => p.id}
+                              onOpenEditor={() =>
+                                void emit("menu-event", "notes-open")
+                              }
+                            />
+                          </div>
+                        </Show>
                         <For each={arr()}>
                           {(tab, ti) => {
                             const isFacing = () =>
@@ -739,7 +851,10 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                                       : "none",
                                 };
                               }
-                              const n = arr().length;
+                              // Cylinder has notes at slot 0 and terminal i
+                              // at slot i+1, so total slot count is
+                              // arr.length + 1.
+                              const n = arr().length + 1;
                               if (n < 2) {
                                 return {
                                   ...base,
@@ -747,7 +862,7 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                                   transform: "translateZ(0)",
                                 };
                               }
-                              const angle = slotOffsetDeg(ti(), n);
+                              const angle = slotOffsetDeg(ti() + 1, n);
                               const r = radiusFor(n);
                               return {
                                 ...base,

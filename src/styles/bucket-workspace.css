@@ -313,6 +313,7 @@
   background: #0e0e10;
 }
 
+
 .bw-rings {
   position: absolute;
   inset: 0;
@@ -410,6 +411,28 @@
      premultiplied via opacity), so colour is unambiguous. */
   box-shadow: 0 0 0 2px var(--pane-accent, rgba(255, 255, 255, 0.25)),
               0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Notes face — same cylinder slot dimensions as a regular bw-pane, but
+   always at full opacity + interactive, with the project accent on the
+   frame so it reads as a peer of the active terminal. The face's
+   transform is set inline from BucketWorkspace.tsx, matching slot 0 of
+   the per-project (notes + terminals) cylinder. */
+.bw-pane.is-3d.is-notes {
+  opacity: 1;
+  pointer-events: auto;
+  box-shadow: 0 0 0 2px var(--pane-accent, rgba(255, 255, 255, 0.4)),
+              0 8px 32px rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+}
+
+/* Active notes face: same accent ring + drop shadow combo as a facing
+   terminal pane. Spelled out explicitly because `.is-notes` is the later
+   selector in source order and would otherwise win the cascade against
+   the shared `.is-facing` rule. */
+.bw-pane.is-3d.is-notes.is-facing {
+  box-shadow: 0 0 0 2px var(--pane-accent, rgba(255, 255, 255, 0.6)),
+              0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
 /* Hide panes belonging to inactive rings entirely. Without this, when

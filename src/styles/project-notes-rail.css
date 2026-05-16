@@ -1,0 +1,147 @@
+/* Per-project notes panel for both 3D views. The rail is rendered
+   INSIDE a cylinder face element (.terminal-host.is-3d.is-notes or
+   .bw-pane.is-3d.is-notes), which owns the absolute positioning,
+   inset, transform, opacity, and accent box-shadow. The rail's job is
+   just to fill that face with header + list + preview content. */
+
+.project-notes-rail {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0e0e10;
+  overflow: hidden;
+  color: #d6d6d6;
+  font-size: 12px;
+}
+
+.pnr-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.pnr-title {
+  color: rgba(255, 255, 255, 0.65);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pnr-edit {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 3px 9px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.pnr-edit:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.pnr-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  flex: 0 0 38%;
+  overflow-y: auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  scrollbar-width: thin;
+}
+
+.pnr-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #c4c4c8;
+  transition: background 80ms ease, color 80ms ease;
+}
+
+.pnr-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #ececef;
+}
+
+.pnr-item.is-selected {
+  background: rgba(255, 255, 255, 0.08);
+  border-left-color: var(--pane-accent, rgba(255, 255, 255, 0.4));
+  color: #ffffff;
+}
+
+.pnr-empty {
+  padding: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  font-style: italic;
+}
+
+.pnr-preview {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.22);
+  scrollbar-width: thin;
+}
+
+/* Quill in read-only mode still ships its snow-theme toolbar slot — hide it. */
+.pnr-preview .ql-toolbar {
+  display: none !important;
+}
+
+.pnr-preview .ql-container {
+  border: none !important;
+  font-size: 12px;
+  background: transparent;
+  font-family: inherit;
+}
+
+.pnr-preview .ql-editor {
+  padding: 10px 12px;
+  color: #d6d6d6;
+  min-height: auto;
+}
+
+.pnr-preview .ql-editor h1,
+.pnr-preview .ql-editor h2,
+.pnr-preview .ql-editor h3 {
+  color: #ffffff;
+}
+
+.pnr-preview .ql-editor img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.pnr-preview .ql-editor a {
+  color: #88b8ff;
+}
+
+.pnr-preview .ql-editor code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.pnr-preview .ql-editor pre.ql-syntax,
+.pnr-preview .ql-editor pre {
+  background: rgba(0, 0, 0, 0.4);
+  color: #d6d6d6;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+}

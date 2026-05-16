@@ -7,7 +7,6 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { convertFileSrc } from "@tauri-apps/api/core";
 
 import {
   bytesToBase64,
@@ -15,12 +14,16 @@ import {
   deleteNote,
   listNotes,
   onMenuEvent,
-  resolveNoteImage,
   saveNoteImage,
   setNoteTitle,
   updateNote,
   getNote,
 } from "../lib/ipc";
+import {
+  ensureQuill,
+  notifyNotesChanged,
+  setNoteProjectContext,
+} from "../lib/notes-quill";
 import type { Note, NoteSummary } from "../lib/types";
 
 function displayTitle(n: NoteSummary): string {
@@ -31,88 +34,6 @@ function displayTitle(n: NoteSummary): string {
 
 interface NotesModalProps {
   projectId: number;
-}
-
-// Mutable per-window state shared with the custom Quill image blot. We can
-// keep this at module scope because each window owns its own JS realm and at
-// most one NotesModal exists per window.
-let currentProjectId: number | null = null;
-
-// Quill is heavy (~45 KB gz + CSS). We only need it once the user actually
-// opens the modal. ensureQuill() lazy-loads it on first call and caches both
-// the instance and its detached host element so subsequent opens are free.
-type QuillCtx = {
-  quill: import("quill").default;
-  host: HTMLDivElement;
-};
-
-let quillCtxPromise: Promise<QuillCtx> | null = null;
-
-async function ensureQuill(): Promise<QuillCtx> {
-  if (quillCtxPromise) return quillCtxPromise;
-  quillCtxPromise = (async () => {
-    // Lazy CSS — Vite handles dynamic stylesheet imports.
-    await import("quill/dist/quill.snow.css");
-    const Quill = (await import("quill")).default;
-
-    // Custom Image blot that stores the *relative* rel-path inside the Delta
-    // (e.g. "notes/<uuid>.png") so the document survives moving the app data
-    // dir or sharing the DB across users in the future. The actual <img src>
-    // is resolved at render time via the asset protocol.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ImageBlot: any = Quill.import("formats/image");
-
-    class NoteImage extends ImageBlot {
-      static blotName = "image";
-      static create(value: string): HTMLElement {
-        // Build a bare <img> ourselves — calling super.create() would set the
-        // src to the raw rel-path, which the webview can't fetch.
-        const node = document.createElement("img");
-        node.setAttribute("data-rel-path", value);
-        // src is filled in asynchronously below; until then the image slot
-        // is empty (avoids a broken-image flash).
-        node.setAttribute("src", "");
-        if (currentProjectId != null) {
-          resolveNoteImage(currentProjectId, value)
-            .then((abs) => {
-              node.src = convertFileSrc(abs);
-            })
-            .catch((err) => console.warn("resolve image failed:", err));
-        }
-        return node;
-      }
-      static value(node: HTMLElement): string {
-        return node.getAttribute("data-rel-path") ?? "";
-      }
-    }
-
-    // `true` flag tells Quill to overwrite the existing 'formats/image'
-    // registration.
-    Quill.register("formats/image", NoteImage, true);
-
-    const host = document.createElement("div");
-    host.className = "notes-quill-host";
-    const editorEl = document.createElement("div");
-    host.appendChild(editorEl);
-
-    const quill = new Quill(editorEl, {
-      theme: "snow",
-      placeholder: "Type your note…",
-      modules: {
-        toolbar: [
-          [{ header: [1, 2, 3, false] }],
-          ["bold", "italic", "underline", "strike"],
-          [{ list: "ordered" }, { list: "bullet" }],
-          [{ color: [] }, { background: [] }],
-          ["link", "code-block", "code"],
-          ["clean"],
-        ],
-      },
-    });
-
-    return { quill, host };
-  })();
-  return quillCtxPromise;
 }
 
 function formatRelativeTime(iso: string): string {
@@ -202,6 +123,7 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
         });
         if (issuedGen > contentSavedGen) contentSavedGen = issuedGen;
         refreshDirty();
+        notifyNotesChanged(props.projectId);
       } catch (err) {
         console.error("updateNote failed:", err);
       }
@@ -264,6 +186,7 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
         });
         if (issuedGen > titleSavedGen) titleSavedGen = issuedGen;
         refreshDirty();
+        notifyNotesChanged(props.projectId);
       } catch (err) {
         console.error("setNoteTitle failed:", err);
       }
@@ -312,6 +235,7 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
       if (cGen > contentSavedGen) contentSavedGen = cGen;
       if (tGen > titleSavedGen) titleSavedGen = tGen;
       refreshDirty();
+      if (latest) notifyNotesChanged(props.projectId);
     } catch (err) {
       console.error("flushPendingSaves failed:", err);
     }
@@ -359,6 +283,7 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
       if (cGen > contentSavedGen) contentSavedGen = cGen;
       if (tGen > titleSavedGen) titleSavedGen = tGen;
       refreshDirty();
+      if (latest) notifyNotesChanged(props.projectId);
     } catch (err) {
       console.error("saveNow failed:", err);
     } finally {
@@ -391,6 +316,7 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
         },
         ...(curr ?? []),
       ]);
+      notifyNotesChanged(props.projectId);
       await selectNote(note.id);
     } catch (err) {
       console.error("createNote failed:", err);
@@ -415,6 +341,7 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
       }
       await deleteNote(noteId);
       mutate((curr) => (curr ? curr.filter((n) => n.id !== noteId) : curr));
+      notifyNotesChanged(props.projectId);
       if (selectedId() === noteId) {
         setSelectedId(null);
         loadedNoteId = null;
@@ -523,7 +450,7 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
 
   onMount(async () => {
     const unlisten = await onMenuEvent("notes-open", async () => {
-      currentProjectId = props.projectId;
+      setNoteProjectContext(props.projectId);
       setOpen(true);
       // Refetch list every time we open so we reflect any rust-side changes.
       refetch();

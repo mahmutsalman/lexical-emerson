@@ -6,10 +6,13 @@ import {
   For,
   onCleanup,
   onMount,
+  Show,
 } from "solid-js";
 import type { Accessor } from "solid-js";
+import { emit } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
+import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
 import {
   markActive,
@@ -94,8 +97,12 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   // narrowed face width (62% of viewport), matching `.terminal-host.is-3d`'s
   // width: 62% rule in CSS.
   const FACE_WIDTH_FRAC = 0.62;
+  // Notes face occupies slot 0; terminal i occupies slot i+1. So total slot
+  // count = terminals + 1, and every cylinder calculation that used to take
+  // `projectTabs().length` takes slotCount() instead.
+  const slotCount = () => projectTabs().length + 1;
   const radius = () => {
-    const n = projectTabs().length;
+    const n = slotCount();
     if (n < 2) return 0;
     const halfSlotRad = (slotAngleDeg(n) * Math.PI) / 180 / 2;
     return (panelWidth() * FACE_WIDTH_FRAC) / 2 / Math.tan(halfSlotRad);
@@ -105,13 +112,21 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     projectTabs().findIndex((t) => t.id === activeId());
   // Auto-centre the active terminal: its world angle becomes 0°, facing the
   // viewer straight-on. ⌘K / ⌘⇧K and ⌘⌥→ / ⌘⌥← all cycle the active
-  // terminal and let this formula re-centre the cylinder.
+  // terminal and let this formula re-centre the cylinder. The active
+  // terminal lives at slot (activeIdx + 1) since notes occupies slot 0.
   const wrapperRotation = () => {
-    const n = projectTabs().length;
+    const n = slotCount();
     if (n < 2) return 0;
     const idx = activeIdx();
     if (idx < 0) return 0;
-    return -slotOffsetDeg(idx, n);
+    return -slotOffsetDeg(idx + 1, n);
+  };
+  // Angle of the notes face — always slot 0 (leftmost), so it sits one slot
+  // to the left of whichever terminal is currently centred.
+  const notesAngleDeg = () => {
+    const n = slotCount();
+    if (n < 2) return 0;
+    return slotOffsetDeg(0, n);
   };
 
   const setActiveForCurrent = (id: string) => {
@@ -376,6 +391,27 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
               : undefined
           }
         >
+          {/* Notes face — occupies slot 0 of the cylinder so it rotates
+              with terminals during ⌘⌥←/→ navigation. Same face dimensions
+              (.terminal-host.is-3d) so the rail sits inside the standard
+              62% pane box at the same slot angle as the other faces. */}
+          <Show when={is3d()}>
+            <div
+              class="terminal-host is-3d is-notes"
+              style={
+                {
+                  display: "flex",
+                  transform: `rotateY(${notesAngleDeg()}deg) translateZ(${radius()}px)`,
+                  "--pane-accent": props.accent?.() ?? "",
+                } as Record<string, string>
+              }
+            >
+              <ProjectNotesPanel
+                projectId={() => props.projectId}
+                onOpenEditor={() => void emit("menu-event", "notes-open")}
+              />
+            </div>
+          </Show>
           <For each={allTabs()}>
             {(tab) => {
               const inThisProject = () =>
@@ -392,8 +428,9 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
                 }
                 const idx = tabIdx();
                 if (idx < 0) return { display: "none" };
-                const n = projectTabs().length;
-                const angle = slotOffsetDeg(idx, n);
+                const n = slotCount();
+                // Terminal i is at slot i+1 (notes takes slot 0).
+                const angle = slotOffsetDeg(idx + 1, n);
                 const r = radius();
                 return {
                   display: "flex",

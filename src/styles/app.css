@@ -348,6 +348,20 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25), 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
+/* Notes face — same cylinder slot dimensions as a terminal host, but
+   always at full opacity + interactive, with the project accent on the
+   frame so it reads as a peer of the active terminal. The face's
+   transform (rotateY + translateZ) is set inline from TerminalsView.tsx,
+   matching slot 0 of the (notes + terminals) cylinder. */
+.terminal-host.is-3d.is-notes {
+  opacity: 1;
+  pointer-events: auto;
+  box-shadow: 0 0 0 2px var(--pane-accent, rgba(255, 255, 255, 0.4)),
+              0 8px 32px rgba(0, 0, 0, 0.4);
+  background: #0e0e10;
+  border-radius: 4px;
+}
+
 /* Drop the inner padding in 3D mode — xterm.js measures mouse positions
    against its rect, and a padding-driven offset between the click target and
    the rendered cells shows up as a "selection one row below click" bug under
