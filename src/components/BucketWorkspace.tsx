@@ -491,6 +491,12 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     >
       {(b) => (
         <div class={`bucket-workspace mode-${mode()}`}>
+          {/* Hover-zone trigger that brings the auto-hidden header back
+              in 3D mode. Lives BEFORE the header in DOM so the CSS
+              sibling combinator (`.bw-header-trigger:hover ~ .bw-header`)
+              works without JS. Hidden in 2D mode (CSS gates on the
+              parent's mode-3d class). */}
+          <div class="bw-header-trigger" aria-hidden="true" />
           <header class="bw-header">
             <span class="bw-title">{b().name}</span>
             <span
