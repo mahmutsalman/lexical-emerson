@@ -16,6 +16,7 @@ import {
   onMenuEvent,
   removeFromBucket,
   setActiveBucket,
+  setBucketAutoRestore,
   spawnBucket3DWorkspace,
 } from "../lib/ipc";
 import type { Bucket } from "../lib/types";
@@ -74,6 +75,15 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
       await spawnBucket3DWorkspace(b.id);
     } catch (err) {
       console.error("spawnBucket3DWorkspace failed:", err);
+    }
+  };
+
+  const handleToggleAutoRestore = async (b: Bucket) => {
+    closeMenu();
+    try {
+      await setBucketAutoRestore(b.id, !b.auto_restore_sessions);
+    } catch (err) {
+      console.error("setBucketAutoRestore failed:", err);
     }
   };
 
@@ -286,6 +296,15 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
               >
                 Open in 3D Workspace
               </button>
+              <button
+                type="button"
+                class="context-menu-item"
+                onClick={() => handleToggleAutoRestore(m().bucket)}
+                title="When on, this bucket's Claude sessions are restored on next launch"
+              >
+                Auto-restore Claude sessions:{" "}
+                {m().bucket.auto_restore_sessions ? "on" : "off"}
+              </button>
             </div>
           </Portal>
         )}
@@ -294,8 +313,8 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
   );
 };
 
-const MENU_W = 220;
-const MENU_H = 80;
+const MENU_W = 240;
+const MENU_H = 120;
 
 function clampMenuX(x: number): number {
   const max = window.innerWidth - MENU_W - 8;

@@ -30,6 +30,19 @@ export interface Bucket {
   name: string;
   cursor: number;
   projects: Project[];
+  auto_restore_sessions: boolean;
+}
+
+export interface PersistedTerminal {
+  id: number;
+  project_id: number;
+  cwd: string;
+  // null when the on-disk Claude session file no longer exists (or was never
+  // detected at save time). Restoration falls back to a bare `claude` in
+  // that case.
+  claude_session_id: string | null;
+  position: number;
+  saved_at: string;
 }
 
 export interface NoteSummary {

@@ -8,7 +8,8 @@ use tauri::{
 use tauri_plugin_dialog::DialogExt;
 
 use crate::projects::folder_basename;
-use crate::store::{Bucket, Note, NoteSummary, Project};
+use crate::session_restore;
+use crate::store::{Bucket, Note, NoteSummary, PersistedTerminal, Project};
 use crate::{AppState, PtyTerminalInfo};
 
 #[derive(Serialize)]
@@ -785,4 +786,120 @@ pub fn resolve_note_image(
         .ok_or_else(|| "notes dir has no parent".to_string())?;
     let abs = base.join(rel_path);
     Ok(abs.to_string_lossy().into_owned())
+}
+
+// --- session restore -------------------------------------------------------
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_bucket_auto_restore(
+    app: AppHandle,
+    state: State<AppState>,
+    bucket_id: i64,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .store
+        .set_bucket_auto_restore(bucket_id, enabled)
+        .map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
+// Snapshot a project's ordered terminal tabs to SQLite. Called from the
+// frontend window's close-requested handler so the in-window tab order is
+// preserved. The gate (`project_has_auto_restore_bucket`) is checked here so
+// the frontend doesn't need to know the bucket→project relationship:
+//   - gate open  → detect Claude session per tab, write Claude-only rows
+//   - gate closed → delete any prior rows for this project (intent: "stop
+//                   saving" implies "don't restore stale state either")
+//
+// This explicitly does NOT keep any process alive. PTYs are still killed by
+// the existing TerminalPane teardown path; we record only the on-disk
+// Claude session UUIDs so `claude --resume <uuid>` can pick them up on the
+// next launch.
+#[tauri::command(rename_all = "camelCase")]
+pub fn persist_project_terminals(
+    state: State<AppState>,
+    project_id: i64,
+    cwds: Vec<String>,
+) -> Result<(), String> {
+    let gate = state
+        .store
+        .project_has_auto_restore_bucket(project_id)
+        .map_err(|e| e.to_string())?;
+    if !gate {
+        state
+            .store
+            .delete_persisted_terminals_for_project(project_id)
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let mut claimed: HashSet<String> = HashSet::new();
+    let mut rows: Vec<(String, Option<String>)> = Vec::new();
+    for cwd in cwds {
+        let uuid = session_restore::detect_claude_session(&cwd, &mut claimed);
+        // Claude-only filter: tabs with no detected session are skipped.
+        if uuid.is_some() {
+            rows.push((cwd, uuid));
+        }
+    }
+
+    state
+        .store
+        .replace_persisted_terminals_for_project(project_id, &rows)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// Used at startup by the project window to decide whether to seed the
+// terminal panel from prior state. Honors the same per-bucket gate as
+// `persist_project_terminals`: a project no longer in any auto-restore
+// bucket returns an empty list even if old rows still exist.
+//
+// Also drops rows whose .jsonl session file is gone from disk OR whose
+// cwd no longer exists — restoring those would just spawn a bare shell
+// at a broken path or replay a stale prompt-only Claude state.
+#[tauri::command(rename_all = "camelCase")]
+pub fn list_persisted_terminals(
+    state: State<AppState>,
+    project_id: i64,
+) -> Result<Vec<PersistedTerminal>, String> {
+    let gate = state
+        .store
+        .project_has_auto_restore_bucket(project_id)
+        .map_err(|e| e.to_string())?;
+    if !gate {
+        return Ok(Vec::new());
+    }
+    let rows = state
+        .store
+        .list_persisted_terminals_for_project(project_id)
+        .map_err(|e| e.to_string())?;
+    // Validate cwd existence; null out claude_session_id if file is gone so
+    // the frontend falls back to `claude` (vs `claude --resume <uuid>`).
+    let filtered: Vec<PersistedTerminal> = rows
+        .into_iter()
+        .filter(|r| std::path::Path::new(&r.cwd).is_dir())
+        .map(|mut r| {
+            if let Some(uuid) = r.claude_session_id.as_deref() {
+                if !session_restore::session_file_exists(&r.cwd, uuid) {
+                    r.claude_session_id = None;
+                }
+            }
+            r
+        })
+        .collect();
+    Ok(filtered)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn delete_persisted_terminals_for_project(
+    state: State<AppState>,
+    project_id: i64,
+) -> Result<(), String> {
+    state
+        .store
+        .delete_persisted_terminals_for_project(project_id)
+        .map_err(|e| e.to_string())
 }

@@ -7,6 +7,7 @@ import type {
   DirEntry,
   Note,
   NoteSummary,
+  PersistedTerminal,
   Project,
   PtyDataEvent,
   PtyExitEvent,
@@ -252,6 +253,40 @@ export async function debugInsertFakeRegistryEntry(
 
 export async function onTerminalsChanged(cb: () => void): Promise<UnlistenFn> {
   return await listen<void>("terminals://changed", () => cb());
+}
+
+// --- session restore -------------------------------------------------------
+
+export async function setBucketAutoRestore(
+  bucketId: number,
+  enabled: boolean,
+): Promise<void> {
+  await invoke("set_bucket_auto_restore", { bucketId, enabled });
+}
+
+// Snapshot the current ordered list of terminal cwds for `projectId`. Rust
+// detects the Claude session UUID per cwd, applies the bucket-gate, and
+// writes one row per Claude-running tab. No process is kept alive across
+// the call — the PTYs are still torn down by TerminalPane's onCleanup.
+export async function persistProjectTerminals(
+  projectId: number,
+  cwds: string[],
+): Promise<void> {
+  await invoke("persist_project_terminals", { projectId, cwds });
+}
+
+export async function listPersistedTerminals(
+  projectId: number,
+): Promise<PersistedTerminal[]> {
+  return await invoke<PersistedTerminal[]>("list_persisted_terminals", {
+    projectId,
+  });
+}
+
+export async function deletePersistedTerminalsForProject(
+  projectId: number,
+): Promise<void> {
+  await invoke("delete_persisted_terminals_for_project", { projectId });
 }
 
 // --- notes -----------------------------------------------------------------

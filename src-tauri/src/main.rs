@@ -4,6 +4,7 @@
 mod commands;
 mod projects;
 mod pty;
+mod session_restore;
 mod store;
 
 use std::collections::HashMap;
@@ -93,6 +94,10 @@ fn main() {
             commands::rescan_terminals,
             commands::spawn_bucket_3d_workspace,
             commands::debug_insert_fake_registry_entry,
+            commands::set_bucket_auto_restore,
+            commands::persist_project_terminals,
+            commands::list_persisted_terminals,
+            commands::delete_persisted_terminals_for_project,
         ])
         .setup(|app| {
             let app_data = app

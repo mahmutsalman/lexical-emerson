@@ -20,10 +20,11 @@ CREATE INDEX IF NOT EXISTS idx_projects_recent
     ON projects(last_active_at DESC, last_focused_at DESC);
 
 CREATE TABLE IF NOT EXISTS buckets (
-    id         INTEGER PRIMARY KEY,
-    name       TEXT NOT NULL,
-    cursor     INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id                    INTEGER PRIMARY KEY,
+    name                  TEXT NOT NULL,
+    cursor                INTEGER NOT NULL DEFAULT 0,
+    created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    auto_restore_sessions INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS bucket_projects (
@@ -51,6 +52,22 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE INDEX IF NOT EXISTS idx_notes_project_recent
     ON notes(project_id, updated_at DESC);
+
+-- Per-project ordered snapshot written at app-quit/window-close when at
+-- least one bucket containing the project has auto_restore_sessions=1.
+-- One row per terminal tab; restoration spawns a fresh PTY at `cwd` and
+-- (if claude_session_id is non-null and the .jsonl still exists) injects
+-- `claude --resume <uuid>` so Claude rehydrates the on-disk transcript.
+CREATE TABLE IF NOT EXISTS persisted_terminals (
+    id                INTEGER PRIMARY KEY,
+    project_id        INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    cwd               TEXT NOT NULL,
+    claude_session_id TEXT,
+    position          INTEGER NOT NULL DEFAULT 0,
+    saved_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_persisted_terminals_project
+    ON persisted_terminals(project_id, position);
 ";
 
 #[derive(Serialize, Clone)]
@@ -83,6 +100,7 @@ impl Store {
         // table exists, so new columns must be ALTERed in by hand.
         migrate_notes_columns(&conn)?;
         migrate_projects_columns(&conn)?;
+        migrate_buckets_columns(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -213,16 +231,29 @@ impl Store {
     pub fn list_buckets(&self) -> Result<Vec<Bucket>> {
         let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cursor FROM buckets ORDER BY created_at ASC, id ASC",
+            "SELECT id, name, cursor, auto_restore_sessions
+               FROM buckets
+              ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
         })?;
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, cursor) = r?;
+            let (id, name, cursor, auto_restore) = r?;
             let projects = load_bucket_projects(&conn, id)?;
-            out.push(Bucket { id, name, cursor, projects });
+            out.push(Bucket {
+                id,
+                name,
+                cursor,
+                projects,
+                auto_restore_sessions: auto_restore != 0,
+            });
         }
         Ok(out)
     }
@@ -230,15 +261,26 @@ impl Store {
     pub fn get_bucket(&self, id: i64) -> Result<Option<Bucket>> {
         let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
         match conn.query_row(
-            "SELECT id, name, cursor FROM buckets WHERE id = ?1",
+            "SELECT id, name, cursor, auto_restore_sessions FROM buckets WHERE id = ?1",
             params![id],
             |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
             },
         ) {
-            Ok((id, name, cursor)) => {
+            Ok((id, name, cursor, auto_restore)) => {
                 let projects = load_bucket_projects(&conn, id)?;
-                Ok(Some(Bucket { id, name, cursor, projects }))
+                Ok(Some(Bucket {
+                    id,
+                    name,
+                    cursor,
+                    projects,
+                    auto_restore_sessions: auto_restore != 0,
+                }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -254,6 +296,7 @@ impl Store {
             name: name.to_string(),
             cursor: 0,
             projects: Vec::new(),
+            auto_restore_sessions: false,
         })
     }
 
@@ -406,6 +449,99 @@ impl Store {
             params![next, bucket_id],
         )?;
         Ok(Some(projects[next as usize].clone()))
+    }
+
+    // --- session restore --------------------------------------------------
+
+    // Flip the per-bucket "auto-restore Claude sessions" toggle. Idempotent.
+    pub fn set_bucket_auto_restore(&self, bucket_id: i64, enabled: bool) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE buckets SET auto_restore_sessions = ?1 WHERE id = ?2",
+            params![if enabled { 1 } else { 0 }, bucket_id],
+        )?;
+        Ok(())
+    }
+
+    // True when at least one bucket containing `project_id` has the toggle on.
+    // The persistence and restore paths both consult this — once the gate
+    // closes, neither save nor restore happens for that project.
+    pub fn project_has_auto_restore_bucket(&self, project_id: i64) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*)
+               FROM bucket_projects bp
+               JOIN buckets b ON b.id = bp.bucket_id
+              WHERE bp.project_id = ?1
+                AND b.auto_restore_sessions = 1",
+            params![project_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn list_persisted_terminals_for_project(
+        &self,
+        project_id: i64,
+    ) -> Result<Vec<PersistedTerminal>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, cwd, claude_session_id, position, saved_at
+               FROM persisted_terminals
+              WHERE project_id = ?1
+              ORDER BY position ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![project_id], |row| {
+            Ok(PersistedTerminal {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                cwd: row.get(2)?,
+                claude_session_id: row.get(3)?,
+                position: row.get(4)?,
+                saved_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    // Replace all rows for `project_id` with the new ordered list. Uses a
+    // single transaction so a concurrent reader can't observe a half-written
+    // state. The caller is responsible for filtering to Claude-only tabs and
+    // assigning positions before invoking.
+    pub fn replace_persisted_terminals_for_project(
+        &self,
+        project_id: i64,
+        rows: &[(String, Option<String>)],
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM persisted_terminals WHERE project_id = ?1",
+            params![project_id],
+        )?;
+        for (idx, (cwd, claude_session_id)) in rows.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO persisted_terminals
+                    (project_id, cwd, claude_session_id, position)
+                  VALUES (?1, ?2, ?3, ?4)",
+                params![project_id, cwd, claude_session_id, idx as i64],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_persisted_terminals_for_project(&self, project_id: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "DELETE FROM persisted_terminals WHERE project_id = ?1",
+            params![project_id],
+        )?;
+        Ok(())
     }
 
     // --- notes -------------------------------------------------------------
@@ -569,6 +705,21 @@ fn migrate_projects_columns(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_buckets_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(buckets)")?;
+    let column_names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !column_names.iter().any(|n| n == "auto_restore_sessions") {
+        conn.execute(
+            "ALTER TABLE buckets ADD COLUMN auto_restore_sessions INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
     Ok(Note {
         id: row.get(0)?,
@@ -629,6 +780,17 @@ pub struct Bucket {
     pub name: String,
     pub cursor: i64,
     pub projects: Vec<Project>,
+    pub auto_restore_sessions: bool,
+}
+
+#[derive(Serialize, Clone)]
+pub struct PersistedTerminal {
+    pub id: i64,
+    pub project_id: i64,
+    pub cwd: String,
+    pub claude_session_id: Option<String>,
+    pub position: i64,
+    pub saved_at: String,
 }
 
 #[derive(Serialize, Clone)]

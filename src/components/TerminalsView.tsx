@@ -11,15 +11,20 @@ import {
 import type { Accessor } from "solid-js";
 import { emit } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
 import {
+  bytesToBase64,
+  listPersistedTerminals,
   markActive,
   onMenuEvent,
   onRescanRequest,
+  persistProjectTerminals,
   registerTerminal,
   unregisterTerminal,
+  writeTerminal,
 } from "../lib/ipc";
 
 interface Tab {
@@ -53,6 +58,12 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   const [sessionIdByTab, setSessionIdByTab] = createSignal<
     Record<string, string>
   >({});
+  // One-shot shell command to write to a tab's PTY ~250 ms after it spawns.
+  // Used by the session-restore path to inject `claude --resume <uuid>` once
+  // zsh has printed its prompt. Cleared as soon as the command is dispatched.
+  const [postSpawnByTab, setPostSpawnByTab] = createSignal<
+    Record<string, string>
+  >({});
   const [activeByProject, setActiveByProject] = createSignal<
     Record<string, string>
   >({});
@@ -60,6 +71,10 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     Record<string, boolean>
   >({});
   const [panelWidth, setPanelWidth] = createSignal(800);
+  // True while we're checking SQLite for persisted tabs for this project.
+  // Default true so the "ensure ≥1 tab" effect doesn't auto-spawn a stray
+  // empty terminal before restoration has a chance to seed the list.
+  const [restoring, setRestoring] = createSignal(true);
 
   let stackEl!: HTMLDivElement;
   const handles = new Map<string, TerminalHandle>();
@@ -165,7 +180,35 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       .catch((err) =>
         console.warn("[TerminalsView] registerTerminal failed:", err),
       );
+
+    // Restore path: a queued shell command (typically `claude --resume <uuid>`)
+    // waits for zsh to print its prompt and is then injected once. Delay is
+    // a deliberate ~250 ms — short enough to feel snappy, long enough that
+    // the prompt has appeared so the command lands on a fresh line.
+    const cmd = postSpawnByTab()[tabId];
+    if (cmd) {
+      setPostSpawnByTab((prev) => {
+        const next = { ...prev };
+        delete next[tabId];
+        return next;
+      });
+      window.setTimeout(() => {
+        const bytes = new TextEncoder().encode(cmd);
+        writeTerminal(sessionId, bytesToBase64(bytes)).catch((err) =>
+          console.warn("post-spawn write failed:", err),
+        );
+      }, 250);
+    }
   };
+
+  // Build the shell command injected after a restored tab's PTY spawns.
+  // Rust's `list_persisted_terminals` already nulled out claude_session_id
+  // if the .jsonl is gone, so a non-null uuid implies the transcript exists
+  // (modulo a tiny race window). The fallback path runs bare `claude`.
+  const buildResumeCommand = (claudeSessionId: string | null): string =>
+    claudeSessionId
+      ? `claude --resume ${claudeSessionId}\n`
+      : "claude\n";
 
   const closeTerminal = (id: string) => {
     const tab = allTabs().find((t) => t.id === id);
@@ -180,6 +223,11 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       unregisterTerminal(sid).catch(() => {});
     }
     setSessionIdByTab((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setPostSpawnByTab((prev) => {
       const next = { ...prev };
       delete next[id];
       return next;
@@ -221,8 +269,11 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   };
 
   // Whenever the project changes (or on first mount), ensure this project
-  // has at least one terminal and a valid active id.
+  // has at least one terminal and a valid active id. Suspended while the
+  // restore lookup is in flight so we don't spawn an empty terminal that
+  // gets immediately superseded by restored tabs.
   createEffect(() => {
+    if (restoring()) return;
     const path = props.projectPath;
     const ptabs = projectTabs();
     const current = activeByProject()[path];
@@ -268,6 +319,50 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   };
 
   onMount(async () => {
+    // Session restore: seed tabs from SQLite BEFORE the auto-spawn effect
+    // unblocks. Rust applies the per-bucket gate; if the project isn't in
+    // any auto-restore bucket the list comes back empty.
+    try {
+      const list = await listPersistedTerminals(props.projectId);
+      if (list.length > 0) {
+        const newTabs: Tab[] = list.map((entry) => ({
+          id: newTabId(),
+          cwd: entry.cwd,
+          projectPath: props.projectPath,
+          projectId: props.projectId,
+        }));
+        const postSpawn: Record<string, string> = {};
+        for (let i = 0; i < list.length; i++) {
+          postSpawn[newTabs[i].id] = buildResumeCommand(
+            list[i].claude_session_id,
+          );
+        }
+        setPostSpawnByTab((prev) => ({ ...prev, ...postSpawn }));
+        setAllTabs((prev) => [...prev, ...newTabs]);
+        setActiveForCurrent(newTabs[newTabs.length - 1].id);
+      }
+    } catch (err) {
+      console.warn("listPersistedTerminals failed:", err);
+    } finally {
+      setRestoring(false);
+    }
+
+    // Persist on window close: take a snapshot of the project's ordered cwds
+    // and ship it to Rust before the window destroys itself. Rust applies
+    // the per-bucket gate and runs Claude-session detection; if the gate is
+    // closed, prior rows are cleaned up so they don't auto-restore later.
+    const win = getCurrentWebviewWindow();
+    const unlistenClose = await win.onCloseRequested(async (event) => {
+      event.preventDefault();
+      try {
+        const cwds = projectTabs().map((t) => t.cwd);
+        await persistProjectTerminals(props.projectId, cwds);
+      } catch (err) {
+        console.warn("persistProjectTerminals failed:", err);
+      }
+      await win.destroy();
+    });
+
     const unlistens: UnlistenFn[] = await Promise.all([
       onMenuEvent("terminal-new", () => addTerminal()),
       onMenuEvent("terminal-close", () => {
@@ -299,6 +394,7 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
         }
       }),
     ]);
+    unlistens.push(unlistenClose);
 
     // Prime panelWidth synchronously so the first 3D toggle has correct
     // geometry, even before ResizeObserver gets its first callback.
