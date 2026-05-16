@@ -1,16 +1,16 @@
 # Status — Lexical Emerson
 
-**Last updated**: 2026-05-16 20:06
+**Last updated**: 2026-05-16 20:55
 **Current phase**: v0.1 shipped + post-v0.1 feature work (M6 notes, M7 workspace)
-**Current slice**: M7 polish — per-project notes face + 3D ring geometry fixes
+**Current slice**: M7 polish — drag-reorder + active-row accent + Edit-button fix
 
 ---
 
 ## Last Completed Task
-Per-project notes face is now a first-class peer of terminals in the 3D cylinder, in both the per-project TerminalsView and every ring of the Bucket Workspace. ⌘⌥←/→ in the Bucket Workspace cycles [notes, t0, t1, …] instead of skipping the notes slot; projects with zero terminals default to notes-as-active so the face is always reachable. Shared Quill setup extracted into `src/lib/notes-quill.ts` so modal and read-only rail share rendering. Also fixed the bw-rings transform: was `translateY ∘ rotateX`, which left the active ring at non-zero z when tilted, pulling lower rings toward the camera and visually enlarging them via perspective. Swapped to `rotateX ∘ translateY` — active ring is now pinned to z=0 regardless of stack depth. Commit 68de62d.
+Three M7 polish items shipped in commit 6425743: (a) drag-to-reorder of 2D-tabstrip rows, backed by a new Rust IPC `reorder_bucket_projects` + the existing `buckets://changed` broadcast for cross-window sync; (b) per-project accent on the active row (5px solid bar, tinted background, brighter name; uncolored projects fall back to brand blue); (c) the 3D notes-face Edit button now actually opens NotesModal — it was emitting the wrong event (`menu-event`/`notes-open` global) instead of `menu://notes-open` on the current webview window. Drag-drop swapped from native HTML5 DnD (which WebKit refuses to dispatch `drop` for when a CSS-3D ancestor interferes with hit-testing) to `@thisbeyond/solid-dnd` v0.7.5, the Solid port of the dnd-kit family that NotesWithAudioAndVideo already uses on the React side.
 
 ## Next Concrete Action
-Wire the "Edit" button on the 3D workspace notes face so it opens NotesModal for the ring's project. Today it visibly does nothing when clicked. Probable causes (in priority order): (a) `menu-event "notes-open"` is not routed to the BucketWorkspace window's NotesModal — it may only be listened to by App.tsx in per-project windows; (b) ProjectNotesPanel's `onOpenEditor` emit is firing but the modal's listener is scoped wrong; (c) pointer-events on the 3D pane swallow the click before the button receives it (less likely — same issue would block scroll/keyboard, and those work). First check: open devtools in the workspace window, click Edit, confirm whether the menu-event fires.
+M7 has no remaining known polish items. User has approved each fix as it shipped. Three plausible directions: (1) **v0.2 candidates** — notarization + GitHub Release with prebuilt DMG (ADR-0008 deferred), or Linux/Windows builds, or per-project shell override; (2) **demo GIF for the README** so the bucket workspace is visible to people who land on the repo; (3) **session persistence** for workspace-owned PTYs (currently die with the process). Ask the user which to pick up first when they return.
 
 ## Active Blockers
 - none
@@ -18,7 +18,7 @@ Wire the "Edit" button on the 3D workspace notes face so it opens NotesModal for
 ## Open Questions
 - Should workspace-owned terminals survive *app quit*, or die with the process like every other PTY? Currently die. No persistence layer for live PTY state.
 - Notarization timing — still deferred per ADR-0008.
-- Once Edit-button bug is fixed, anything else before moving to v0.2 candidates?
+- v0.2 scope: ship-as-is and gather feedback, or fold in Linux/Windows + per-project shell first?
 
 ## Recent Decisions (last 3)
 - ADR-0010 — Bucket Workspace + Tauri v2 ACL window-scoping gotcha (load-bearing: future window labels must update capabilities)
