@@ -132,6 +132,15 @@ export const App: Component = () => {
     }
   };
 
+  const openFolderInNewWindow = async () => {
+    try {
+      const picked = await pickFolder();
+      if (picked) await navigateToProject(picked);
+    } catch (err) {
+      console.error("openFolderInNewWindow failed:", err);
+    }
+  };
+
   let unlistenFocus: UnlistenFn | undefined;
   let unlistenBuckets: UnlistenFn | undefined;
   let unlistenBucketNext: UnlistenFn | undefined;
@@ -139,6 +148,7 @@ export const App: Component = () => {
   let unlistenZoomIn: UnlistenFn | undefined;
   let unlistenZoomOut: UnlistenFn | undefined;
   let unlistenZoomReset: UnlistenFn | undefined;
+  let unlistenOpenFolder: UnlistenFn | undefined;
 
   onMount(async () => {
     let label = "main";
@@ -191,6 +201,10 @@ export const App: Component = () => {
     });
     unlistenBucketPrev = await onMenuEvent("bucket-prev", () => {
       cycleBucket(-1).catch((err) => console.warn("cycleBucket(-1) failed:", err));
+    });
+
+    unlistenOpenFolder = await onMenuEvent("file-open-folder", () => {
+      openFolderInNewWindow();
     });
 
     const bumpZoom = (delta: number) => {
@@ -252,6 +266,7 @@ export const App: Component = () => {
     unlistenZoomIn?.();
     unlistenZoomOut?.();
     unlistenZoomReset?.();
+    unlistenOpenFolder?.();
     if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
     if (isMain()) {
       void setMainProject(null);

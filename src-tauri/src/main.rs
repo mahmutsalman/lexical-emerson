@@ -106,6 +106,7 @@ fn main() {
                 _ => {}
             }
             let event_name = match event.id().as_ref() {
+                "file_open_folder" => "menu://file-open-folder",
                 "terminal_new" => "menu://terminal-new",
                 "terminal_close" => "menu://terminal-close",
                 "terminal_next" => "menu://terminal-next",
@@ -205,7 +206,13 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
         .quit()
         .build()?;
 
+    let file_open_folder = MenuItemBuilder::with_id("file_open_folder", "Open Folder…")
+        .accelerator("CmdOrCtrl+O")
+        .build(app)?;
+
     let file_submenu = SubmenuBuilder::new(app, "File")
+        .item(&file_open_folder)
+        .separator()
         .close_window()
         .build()?;
 

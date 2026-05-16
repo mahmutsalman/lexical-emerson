@@ -240,7 +240,8 @@ export async function onMenuEvent(
     | "notes-open"
     | "zoom-in"
     | "zoom-out"
-    | "zoom-reset",
+    | "zoom-reset"
+    | "file-open-folder",
   cb: () => void,
 ): Promise<UnlistenFn> {
   // Scope to the current webview window. The Rust side emits with
