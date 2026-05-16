@@ -395,19 +395,33 @@
   transition: opacity 220ms ease,
               transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
   will-change: transform, opacity;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  /* Pane frame uses the per-project accent (injected as --pane-accent
+     inline style from BucketWorkspace.tsx) so each terminal's border
+     identifies which project owns it. Falls back to neutral white at
+     low opacity for projects without a color tag set. */
+  box-shadow: 0 0 0 1px var(--pane-accent, rgba(255, 255, 255, 0.08));
 }
 
 .bw-pane.is-3d.is-facing {
   pointer-events: auto;
   opacity: 1;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25),
+  /* Active pane: doubled border so the accent reads clearly, plus the
+     existing drop shadow for depth. The accent here is opaque (not
+     premultiplied via opacity), so colour is unambiguous. */
+  box-shadow: 0 0 0 2px var(--pane-accent, rgba(255, 255, 255, 0.25)),
               0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
-/* Non-active rings dim further so the active one reads clearly. */
+/* Hide panes belonging to inactive rings entirely. Without this, when
+   the user ⌘⌥↓-navigates to a different project, the other rings' panes
+   (and especially their accent-colored frames) remain visible in the
+   same viewport — overlapping the active pane because each ring's pane
+   is full-height. opacity:0 fades the pane out smoothly via the pane's
+   existing opacity transition instead of snapping, so ring switches
+   cross-fade. The pointer-events:none on non-active rings (set on the
+   ring itself elsewhere) already prevents stray clicks. */
 .bw-ring:not(.is-active) .bw-pane.is-3d {
-  opacity: 0.28;
+  opacity: 0;
 }
 
 /* xterm hosts inside panes fill the box. Mirrors `.terminal-host .xterm`

@@ -26,6 +26,7 @@ import {
   rescanTerminals,
   unregisterTerminal,
 } from "../lib/ipc";
+import { isColorTag, PALETTE } from "../lib/palette";
 import type { Bucket, Project, PtyTerminalInfo } from "../lib/types";
 
 export interface BucketWorkspaceProps {
@@ -692,6 +693,12 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                   const arr = () => tabsForProject(p.path);
                   const ringY = () => pi() * ringHeightPx();
                   const ringIsActive = () => pi() === activeProjectIdx();
+                  // Per-project accent for the 3D pane frame so the user
+                  // can tell at a glance which project owns the terminal
+                  // they're looking at. Falls back to the white-tinted
+                  // border when the project has no color set.
+                  const paneAccent = () =>
+                    isColorTag(p.color) ? PALETTE[p.color].accent : null;
                   return (
                     <div
                       class={`bw-ring ${ringIsActive() ? "is-active" : ""}`}
@@ -717,29 +724,36 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                               tab.id === activeByProject()[p.path];
                             const inActiveRing = () => ringIsActive();
                             const hostStyle = () => {
+                              const accent = paneAccent();
+                              const base: Record<string, string> = accent
+                                ? { "--pane-accent": accent }
+                                : {};
                               if (mode() !== "3d") {
                                 // 2D: show only the globally-active tab
                                 // (active project's active tab).
                                 return {
+                                  ...base,
                                   display:
                                     inActiveRing() && isFacing()
                                       ? "flex"
                                       : "none",
-                                } as Record<string, string>;
+                                };
                               }
                               const n = arr().length;
                               if (n < 2) {
                                 return {
+                                  ...base,
                                   display: "flex",
                                   transform: "translateZ(0)",
-                                } as Record<string, string>;
+                                };
                               }
                               const angle = slotOffsetDeg(ti(), n);
                               const r = radiusFor(n);
                               return {
+                                ...base,
                                 display: "flex",
                                 transform: `rotateY(${angle}deg) translateZ(${r}px)`,
-                              } as Record<string, string>;
+                              };
                             };
                             return (
                               <div
