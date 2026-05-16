@@ -20,6 +20,7 @@ import {
 
 export interface TerminalHandle {
   focus: () => void;
+  scrollLines: (lines: number) => void;
 }
 
 export interface TerminalPaneProps {
@@ -72,6 +73,26 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
+
+    // macOS shortcuts that aren't standard terminal escape sequences. xterm.js
+    // doesn't know about them, so we translate them to the readline byte the
+    // shell expects — same trick Terminal.app and iTerm2 use.
+    //   Cmd+Backspace      → Ctrl+U (0x15)  delete to start of line
+    //   Cmd+Delete (fwd)   → Ctrl+K (0x0b)  delete to end of line
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      if (!e.metaKey || e.ctrlKey) return true;
+      let byte: string | null = null;
+      if (e.key === "Backspace") byte = "\x15";
+      else if (e.key === "Delete") byte = "\x0b";
+      if (byte === null) return true;
+      if (sessionId) {
+        const bytes = new TextEncoder().encode(byte);
+        writeTerminal(sessionId, bytesToBase64(bytes)).catch(() => {});
+      }
+      e.preventDefault();
+      return false;
+    });
 
     term.open(hostEl);
 
@@ -126,6 +147,7 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
 
     props.onReady?.({
       focus: () => term?.focus(),
+      scrollLines: (lines: number) => term?.scrollLines(lines),
     });
 
     // Debounced resize via ResizeObserver on the container.

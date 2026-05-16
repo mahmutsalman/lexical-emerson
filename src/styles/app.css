@@ -1,9 +1,31 @@
 .app-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  grid-template-rows: 1fr 28px;
+  grid-template-columns: calc(260px * var(--ui-zoom, 1)) 1fr;
+  grid-template-rows: calc(28px * var(--ui-zoom, 1)) 1fr calc(28px * var(--ui-zoom, 1));
   height: 100vh;
   width: 100vw;
+}
+
+.title-bar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  padding: 0 12px 0 76px;
+  background: var(--proj-accent, #2a2a2a);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  -webkit-app-region: drag;
+  user-select: none;
+  zoom: var(--ui-zoom, 1);
+}
+
+.title-bar-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-shell.panels-hidden {
@@ -25,7 +47,7 @@
 
 .panel-toggle-btn {
   position: fixed;
-  top: 6px;
+  top: 34px;
   right: 10px;
   z-index: 50;
   width: 26px;
@@ -37,6 +59,7 @@
   color: #9a9aa3;
   background: transparent;
   -webkit-app-region: no-drag;
+  zoom: var(--ui-zoom, 1);
 }
 
 .panel-toggle-btn:hover {
@@ -54,7 +77,7 @@
 
 .sidebar {
   grid-column: 1;
-  grid-row: 1;
+  grid-row: 2;
   background: #131316;
   border-right: 1px solid #2a2a2f;
   overflow-y: auto;
@@ -62,6 +85,7 @@
   display: flex;
   flex-direction: column;
   box-shadow: inset 3px 0 0 var(--proj-accent, transparent);
+  zoom: var(--ui-zoom, 1);
 }
 
 .sidebar-section {
@@ -93,20 +117,22 @@
 }
 
 .sidebar-button.primary {
-  background: var(--proj-accent, #2d5cc8);
-  color: #ffffff;
+  background: color-mix(in srgb, var(--proj-accent, #2d5cc8) 14%, transparent);
+  color: #e8e8ea;
   font-weight: 500;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--proj-accent, #2d5cc8) 38%, transparent);
 }
 
 .sidebar-button.primary:hover {
-  filter: brightness(1.1);
+  background: color-mix(in srgb, var(--proj-accent, #2d5cc8) 22%, transparent);
+  color: #ffffff;
 }
 
 .workspace {
   grid-column: 2;
-  grid-row: 1;
+  grid-row: 2;
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: calc(240px * var(--ui-zoom, 1)) 1fr;
   min-height: 0;
 }
 
@@ -116,6 +142,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px 0;
+  zoom: var(--ui-zoom, 1);
 }
 
 .terminal-panel {
@@ -145,6 +172,10 @@
      panels-hidden mode, since the terminal panel is always the rightmost
      (or only) workspace pane. */
   box-shadow: inset 0 2px 0 var(--proj-accent, transparent);
+  /* Tabs scale with UI zoom; the terminal stack below does NOT (xterm is a
+     canvas/WebGL surface that would raster-scale and would also desync
+     mouse coords vs getBoundingClientRect under a zoomed ancestor). */
+  zoom: var(--ui-zoom, 1);
 }
 
 .terminal-tab {
@@ -224,11 +255,12 @@
   position: absolute;
   inset: 0;
   flex-direction: column;
-  /* Exclude the terminal subtree from the per-project UI zoom: xterm renders
-     to a canvas/WebGL surface, so WebKit's CSS `zoom` would raster-scale and
-     blur the cells, and FitAddon would read scaled pixel dims that don't
-     match the renderer's font size. Cell size is driven instead by
-     term.options.fontSize in TerminalPane. */
+  /* Defensive `zoom: 1`. The terminal subtree intentionally has NO zoomed
+     ancestor — UI scale is applied per-chrome (title-bar, sidebar,
+     file-tree-panel, bucket-bar, terminal-tabs) so xterm's mouse coords
+     stay in sync with getBoundingClientRect(). Cell size is driven by
+     term.options.fontSize in TerminalPane, scaled in JS from the zoom
+     signal. */
   zoom: 1;
 }
 
@@ -273,7 +305,13 @@
      for the neighbours to peek in. The base `.terminal-host { inset: 0 }`
      is overridden by these four properties. */
   inset: 0 19%;
-  transform-style: preserve-3d;
+  /* `transform-style: flat` (the default) — NOT preserve-3d. The host has no
+     3D-transformed children of its own; xterm renders as a flat plane on
+     the host's surface. Using preserve-3d here breaks WebKit's native
+     wheel→scroll path for overflow:scroll descendants (xterm.js's
+     .xterm-viewport), so trackpad scrollback stops responding in 3D view.
+     The parent .cylinder still has preserve-3d, which is what positions
+     this host correctly in 3D space. */
   backface-visibility: hidden;
   pointer-events: none;
   opacity: 0.85;
@@ -298,7 +336,7 @@
 
 .bucket-bar {
   grid-column: 1 / -1;
-  grid-row: 2;
+  grid-row: 3;
   display: flex;
   align-items: center;
   padding: 0 12px;
@@ -308,6 +346,7 @@
   color: #7a7a82;
   gap: 12px;
   min-height: 28px;
+  zoom: var(--ui-zoom, 1);
 }
 
 .bucket-bar-idle {
@@ -589,12 +628,13 @@
 }
 
 .recent-item.active {
-  background: var(--proj-accent, #2d5cc8);
+  background: color-mix(in srgb, var(--proj-accent, #2d5cc8) 12%, transparent);
   color: #ffffff;
+  box-shadow: inset 2px 0 0 var(--proj-accent, #2d5cc8);
 }
 
 .recent-item.active:hover {
-  filter: brightness(1.1);
+  background: color-mix(in srgb, var(--proj-accent, #2d5cc8) 20%, transparent);
 }
 
 .recent-name {
@@ -618,6 +658,7 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+  zoom: var(--ui-zoom, 1);
 }
 
 .context-menu-item {
@@ -723,6 +764,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  zoom: var(--ui-zoom, 1);
 }
 
 .color-popover-grid {
@@ -789,6 +831,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  zoom: var(--ui-zoom, 1);
 }
 
 .switcher-input {

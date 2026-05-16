@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::Serialize;
 use tauri::{
-    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, State, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_dialog::DialogExt;
 
@@ -243,6 +243,8 @@ fn spawn_or_focus_project_window(app: &AppHandle, project: &Project) -> Result<(
     let title = format!("Lexical Emerson — {}", project.name);
     WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
         .title(title)
+        .title_bar_style(TitleBarStyle::Transparent)
+        .hidden_title(true)
         .inner_size(1200.0, 800.0)
         .min_inner_size(700.0, 480.0)
         .build()

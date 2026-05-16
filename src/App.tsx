@@ -220,10 +220,14 @@ export const App: Component = () => {
     setZoom(clampZoom(z));
   });
   createEffect(() => {
-    // WebKit `zoom` is a layout-scale (not a transform) so it propagates to
-    // child boxes. The terminal subtree resets `zoom: 1` in CSS to keep
-    // FitAddon reading native pixels; cell size is driven by fontSize.
-    (document.documentElement.style as { zoom?: string }).zoom = String(zoom());
+    // Drive UI scale via a CSS variable consumed by individual chrome
+    // selectors (title-bar, sidebar, file-tree, bucket-bar, terminal tabs).
+    // Avoid `zoom` on <html>: even with `zoom: 1` reset on the terminal,
+    // WebKit desyncs mouse-event coordinates from getBoundingClientRect()
+    // for descendants of a zoomed ancestor, which made xterm.js selections
+    // land at the wrong cell. Keeping the terminal subtree out of any
+    // zoomed ancestor restores native click→cell mapping.
+    document.documentElement.style.setProperty("--ui-zoom", String(zoom()));
   });
   createEffect(() => {
     const c = currentProject()?.color;
@@ -258,6 +262,11 @@ export const App: Component = () => {
 
   return (
     <div class="app-shell" classList={{ "panels-hidden": panelsHidden() }}>
+      <header class="title-bar">
+        <span class="title-bar-text">
+          Lexical Emerson{projectName() ? ` — ${projectName()}` : ""}
+        </span>
+      </header>
       <button
         type="button"
         class="panel-toggle-btn"

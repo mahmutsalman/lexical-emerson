@@ -226,9 +226,33 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     });
     ro.observe(stackEl);
 
+    // WebKit won't route wheel→scroll to overflow:scroll descendants of a
+    // 3D-transformed ancestor (the .cylinder), so xterm's native trackpad
+    // scrollback dies the moment 3D view turns on. Intercept the wheel here
+    // and drive the facing terminal's scrollLines manually. 2D path is
+    // untouched — we early-return so xterm keeps its native, momentum-aware
+    // scroll behaviour.
+    const onWheel = (e: WheelEvent) => {
+      if (!is3d()) return;
+      if (e.deltaY === 0) return;
+      const id = activeId();
+      if (!id) return;
+      const handle = handles.get(id);
+      if (!handle) return;
+      const sign = e.deltaY > 0 ? 1 : -1;
+      // Trackpad sends ~1–4px per tick; mouse wheels send ~100px. Divide by
+      // ~18 (rough cell height at default zoom) and floor to at least 1 line
+      // so the smallest trackpad nudge still produces motion.
+      const magnitude = Math.max(1, Math.round(Math.abs(e.deltaY) / 18));
+      handle.scrollLines(sign * magnitude);
+      e.preventDefault();
+    };
+    stackEl.addEventListener("wheel", onWheel, { passive: false });
+
     onCleanup(() => {
       unlistens.forEach((u) => u());
       ro.disconnect();
+      stackEl.removeEventListener("wheel", onWheel);
     });
   });
 
