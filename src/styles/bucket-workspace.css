@@ -205,7 +205,14 @@
   display: none;
 }
 
+/* Per-row CSS variable driving both the always-on identity bar and the
+   active-state tint. Projects with a color tag override --row-accent
+   inline (see BucketWorkspace.tsx); uncolored rows fall back to the
+   brand blue, which is the same default the rest of the chrome uses
+   (var(--proj-accent, #2d5cc8)). The default is intentionally vivid so
+   uncolored rows don't recede into the background. */
 .bw-tabrow {
+  --row-accent: #2d5cc8;
   display: grid;
   grid-template-columns: minmax(120px, 180px) 1fr;
   align-items: center;
@@ -213,13 +220,31 @@
   padding: 4px 8px 4px 6px;
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.02);
-  border-left: 3px solid rgba(255, 255, 255, 0.08);
+  /* Always-on identity bar — every row carries a hint of its colour
+     even when inactive, so glancing at the strip tells you which
+     project is which without having to read names. The tint is the
+     same accent at low opacity so colours stay recognisable. */
+  border-left: 3px solid color-mix(in srgb, var(--row-accent) 38%, transparent);
   cursor: pointer;
+  transition: background 140ms ease, border-left-color 140ms ease,
+              border-left-width 140ms ease, transform 180ms ease;
+}
+
+.bw-tabrow:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-left-color: color-mix(in srgb, var(--row-accent) 60%, transparent);
 }
 
 .bw-tabrow.active {
-  background: rgba(255, 255, 255, 0.05);
-  border-left-color: rgba(255, 255, 255, 0.35);
+  /* Active row is unambiguous: thicker bar, full-strength accent,
+     and a tinted background pulled from the same accent so the row
+     reads as "this is the project I'm looking at." Compensates for
+     the wider bar with reduced left padding so content doesn't jump. */
+  padding-left: 4px;
+  background: color-mix(in srgb, var(--row-accent) 16%, transparent);
+  border-left: 5px solid var(--row-accent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--row-accent) 28%, transparent);
 }
 
 .bw-row-name {
@@ -229,6 +254,31 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bw-tabrow.active .bw-row-name {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* Drag-reorder visuals — solid-dnd drives the actual layout shift
+   through transform on each row (set inline via transformStyle), and
+   the row's transform-transition (declared on .bw-tabrow above) makes
+   the neighbours slide smoothly. This rule only handles how the
+   dragged row itself looks: faded, lifted, ringed in its own accent
+   so the user can see where the grab is. */
+.bw-tabrow.is-dragging {
+  opacity: 0.45;
+  z-index: 2;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45),
+              inset 0 0 0 1px var(--row-accent);
+  /* The dragged row is the one solid-dnd actively translates around
+     under the cursor. Removing the transform-transition on it
+     prevents a fight between solid-dnd's per-pointermove
+     transformStyle and our 180ms ease — without this the dragged
+     element trails the cursor by ~180ms and feels rubbery. */
+  transition: background 140ms ease, opacity 140ms ease,
+              box-shadow 140ms ease;
 }
 
 .bw-row-tabs {

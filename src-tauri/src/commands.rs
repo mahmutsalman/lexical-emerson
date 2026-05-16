@@ -391,6 +391,21 @@ pub fn remove_from_bucket(
 }
 
 #[tauri::command]
+pub fn reorder_bucket_projects(
+    app: AppHandle,
+    state: State<AppState>,
+    bucket_id: i64,
+    project_ids: Vec<i64>,
+) -> Result<(), String> {
+    state
+        .store
+        .set_bucket_project_order(bucket_id, &project_ids)
+        .map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_active_bucket(
     app: AppHandle,
     state: State<AppState>,

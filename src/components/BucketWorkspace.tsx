@@ -10,8 +10,30 @@ import {
   onMount,
   Show,
 } from "solid-js";
-import { emit } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import {
+  closestCenter,
+  DragDropProvider,
+  DragDropSensors,
+  createSortable,
+  SortableProvider,
+  transformStyle,
+  type DragEvent as SolidDndDragEvent,
+} from "@thisbeyond/solid-dnd";
+
+// Tell TS about the `use:sortable` directive — solid-dnd doesn't ship
+// this augmentation, and Solid's JSX compiler needs the directive name
+// to resolve to a value type in JSX.Directives or TS rejects the
+// attribute.
+declare module "solid-js" {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace JSX {
+    interface Directives {
+      sortable: true;
+    }
+  }
+}
 
 import { NotesModal } from "./NotesModal";
 import { ProjectNotesPanel } from "./ProjectNotesPanel";
@@ -26,6 +48,7 @@ import {
   onMenuEvent,
   onTerminalsChanged,
   registerTerminal,
+  reorderBucketProjects,
   rescanTerminals,
   unregisterTerminal,
 } from "../lib/ipc";
@@ -365,6 +388,60 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     setActiveProjectIdx((i) => (i + delta + n) % n);
   };
 
+  // Commit a drag-reorder: rebuild the project-id list in the desired
+  // order and persist it. The buckets://changed broadcast that the
+  // command emits will refetch our local bucket signal, so we don't
+  // mutate `projects()` ourselves — but we DO keep activeProjectIdx
+  // pointed at the same project across the move, so the user's
+  // selection follows the row visually.
+  //
+  // `dstIdx` is the destination index relative to the array AFTER
+  // src has been removed (matches Array.prototype.splice semantics
+  // when called after a removal splice — see solid-dnd's onDragEnd
+  // handler below).
+  const reorderProjects = async (srcIdx: number, dstIdx: number) => {
+    const arr = projects();
+    if (srcIdx === dstIdx) return;
+    if (srcIdx < 0 || srcIdx >= arr.length) return;
+    if (dstIdx < 0 || dstIdx >= arr.length) return;
+    const next = arr.slice();
+    const [moved] = next.splice(srcIdx, 1);
+    next.splice(dstIdx, 0, moved);
+    const activeId = activeProject()?.id ?? null;
+    try {
+      await reorderBucketProjects(
+        props.bucketId,
+        next.map((p) => p.id),
+      );
+    } catch (err) {
+      console.warn("reorderBucketProjects failed:", err);
+      return;
+    }
+    if (activeId != null) {
+      const newIdx = next.findIndex((p) => p.id === activeId);
+      if (newIdx >= 0) setActiveProjectIdx(newIdx);
+    }
+  };
+
+  // solid-dnd's onDragEnd hands us the draggable and the droppable it
+  // landed on. SortableProvider treats every row as both, so we just
+  // look up the two indices and forward to reorderProjects.
+  const handleSortEnd = (event: SolidDndDragEvent) => {
+    const { draggable, droppable } = event;
+    if (!draggable || !droppable) return;
+    const arr = projects();
+    const fromIdx = arr.findIndex((p) => p.id === draggable.id);
+    const toIdx = arr.findIndex((p) => p.id === droppable.id);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+    void reorderProjects(fromIdx, toIdx);
+  };
+
+  // SortableProvider needs a flat id list. Memoised so the provider
+  // doesn't see a new identity on every render — solid-dnd snapshots
+  // initialIds and a fresh array reference each tick would churn its
+  // internal store.
+  const projectIds = createMemo(() => projects().map((p) => p.id));
+
   // Ensure activeByProject has a valid selection per project at all times.
   // When a project has no terminals, default the active slot to the notes
   // sentinel so the per-project notes face is always reachable as the
@@ -648,20 +725,56 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
 
           {/* Tab strip: hidden in 3D mode, visible in 2D. One row per
               project; clicking a row's tab sets it as the global active
-              terminal AND focuses that project's ring. */}
-          <div class="bw-tabstrip">
+              terminal AND focuses that project's ring. Rows are
+              reorderable via solid-dnd — DragDropProvider catches the
+              drag lifecycle, SortableProvider tracks the live id order,
+              and createSortable inside the For wires each row up as
+              both draggable and droppable. The PointerSensor's built-in
+              250ms / 10px activation threshold means a plain click
+              still falls through to onClick. */}
+          <DragDropProvider
+            onDragEnd={handleSortEnd}
+            collisionDetector={closestCenter}
+          >
+            <DragDropSensors />
+            <div class="bw-tabstrip">
+              <SortableProvider ids={projectIds()}>
             <For each={projects()}>
               {(p, pi) => {
                 const arr = () => tabsForProject(p.path);
                 const isActiveRow = () => pi() === activeProjectIdx();
+                const rowAccent = () =>
+                  isColorTag(p.color) ? PALETTE[p.color].accent : null;
                 const handleAdd = (e: MouseEvent) => {
                   e.stopPropagation();
                   addOwnedTerminal(p);
                 };
+                const sortable = createSortable(p.id);
                 return (
                   <div
-                    class={`bw-tabrow ${isActiveRow() ? "active" : ""}`}
-                    classList={{ [`accent-${p.color ?? ""}`]: !!p.color }}
+                    use:sortable
+                    class={`bw-tabrow ${isActiveRow() ? "active" : ""} ${
+                      rowAccent() ? "has-accent" : "no-accent"
+                    } ${sortable.isActiveDraggable ? "is-dragging" : ""}`}
+                    style={{
+                      // Per-row CSS variable: lets the stylesheet drive
+                      // both the always-on identity bar and the
+                      // active-state tint from one source of truth.
+                      // Null accent falls back to the default
+                      // --row-accent defined on .bw-tabrow in CSS.
+                      ...(rowAccent()
+                        ? ({ "--row-accent": rowAccent() } as Record<
+                            string,
+                            string
+                          >)
+                        : {}),
+                      // solid-dnd publishes the live translate during a
+                      // drag (and the layout shift of neighbouring
+                      // rows) through `sortable.transform`. Spreading
+                      // its style here is what gives the rows their
+                      // smooth slide-out-of-the-way feel.
+                      ...transformStyle(sortable.transform),
+                    }}
                     onClick={() => setActiveProjectIdx(pi())}
                   >
                     <span class="bw-row-name" title={p.path}>
@@ -711,13 +824,15 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                 );
               }}
             </For>
-            <Show when={projects().length === 0}>
-              <div class="bw-empty">
-                This bucket has no projects yet. Add a project to the bucket
-                first.
-              </div>
-            </Show>
-          </div>
+              </SortableProvider>
+              <Show when={projects().length === 0}>
+                <div class="bw-empty">
+                  This bucket has no projects yet. Add a project to the
+                  bucket first.
+                </div>
+              </Show>
+            </div>
+          </DragDropProvider>
 
           {/* Per-project notes side rail. Only mounted in 3D mode — in
               flat mode the tab strip carries enough chrome already. The
@@ -824,9 +939,24 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                           >
                             <ProjectNotesPanel
                               projectId={() => p.id}
-                              onOpenEditor={() =>
-                                void emit("menu-event", "notes-open")
-                              }
+                              onOpenEditor={() => {
+                                // NotesModal is scoped to activeProject(),
+                                // so make sure THIS ring's project is the
+                                // active one before opening — otherwise
+                                // the modal would open against whatever
+                                // project was last focused.
+                                setActiveProjectIdx(pi());
+                                // Emit on the current webview window with
+                                // the dotted-prefix name the modal's
+                                // listener (onMenuEvent -> menu://<id>)
+                                // actually subscribes to. The previous
+                                // `emit("menu-event", "notes-open")` was
+                                // a global broadcast of the wrong event
+                                // name, so the modal never saw it.
+                                void getCurrentWebviewWindow().emit(
+                                  "menu://notes-open",
+                                );
+                              }}
                             />
                           </div>
                         </Show>

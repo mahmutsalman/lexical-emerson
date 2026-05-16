@@ -74,6 +74,7 @@ fn main() {
             commands::rename_bucket,
             commands::add_to_bucket,
             commands::remove_from_bucket,
+            commands::reorder_bucket_projects,
             commands::set_active_bucket,
             commands::get_active_bucket,
             commands::cycle_bucket,

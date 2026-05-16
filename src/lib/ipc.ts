@@ -166,6 +166,16 @@ export async function removeFromBucket(
   await invoke("remove_from_bucket", { bucketId, projectId });
 }
 
+// Rewrite the bucket's project order in one go. `projectIds` must be the
+// full membership of the bucket in the desired order; partial slices
+// would leave the omitted projects with stale positions.
+export async function reorderBucketProjects(
+  bucketId: number,
+  projectIds: number[],
+): Promise<void> {
+  await invoke("reorder_bucket_projects", { bucketId, projectIds });
+}
+
 export async function setActiveBucket(id: number | null): Promise<void> {
   await invoke("set_active_bucket", { id });
 }

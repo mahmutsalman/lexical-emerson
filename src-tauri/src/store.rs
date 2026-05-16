@@ -311,6 +311,35 @@ impl Store {
         Ok(())
     }
 
+    /// Rewrite the position column for every project in `project_ids` so the
+    /// bucket's order matches the slice exactly. Ids absent from the slice
+    /// are left untouched — callers are expected to pass the full bucket
+    /// membership; partial slices would leave stale positions colliding with
+    /// the new ones, which the per-row UPDATE wouldn't catch.
+    ///
+    /// All UPDATEs run inside a single transaction so a half-applied reorder
+    /// can't be observed by a concurrent `list_buckets` call. Positions are
+    /// zero-based and dense for symmetry with `add_to_bucket`'s
+    /// `COALESCE(MAX, -1) + 1` insert path.
+    pub fn set_bucket_project_order(
+        &self,
+        bucket_id: i64,
+        project_ids: &[i64],
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let tx = conn.transaction()?;
+        for (pos, pid) in project_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE bucket_projects
+                    SET position = ?1
+                  WHERE bucket_id = ?2 AND project_id = ?3",
+                params![pos as i64, bucket_id, pid],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_active_bucket(&self, id: Option<i64>) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
         match id {
