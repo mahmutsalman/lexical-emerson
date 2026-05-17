@@ -8,6 +8,29 @@ import {
   Show,
 } from "solid-js";
 import { Portal } from "solid-js/web";
+import {
+  closestCenter,
+  createSortable,
+  DragDropProvider,
+  DragDropSensors,
+  SortableProvider,
+  transformStyle,
+  type DragEvent as SolidDndDragEvent,
+} from "@thisbeyond/solid-dnd";
+
+// Same augmentation BucketWorkspace declares — TS interface merging is fine
+// across multiple modules. Repeated here so BucketsList stays compilable
+// even when BucketWorkspace isn't part of the build / is tree-shaken out
+// of the launcher window's bundle (launcher only renders BucketsList; the
+// 3D workspace ships in its own window's render path).
+declare module "solid-js" {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace JSX {
+    interface Directives {
+      sortable: true;
+    }
+  }
+}
 
 import {
   addToBucket,
@@ -16,6 +39,7 @@ import {
   loadActiveClaudeSessionsForBucket,
   onMenuEvent,
   removeFromBucket,
+  reorderBucketProjects,
   requestOpenProject,
   setActiveBucket,
   setBucketAutoRestore,
@@ -118,6 +142,33 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
   const isInBucket = (bucket: Bucket): boolean => {
     if (props.currentProjectId == null) return false;
     return bucket.projects.some((p) => p.id === props.currentProjectId);
+  };
+
+  // Drag-reorder handler for a single bucket's projects. Mirrors the
+  // workspace's pattern (BucketWorkspace.tsx) — solid-dnd's
+  // PointerSensor uses a 250 ms / 10 px activation threshold so a plain
+  // click still falls through to the row's onClick (open project).
+  // Persistence is fire-and-forget: the backend command emits
+  // buckets://changed, which our parent (Sidebar / App) listens to and
+  // refreshes the bucket data — so we never mutate `bucket.projects`
+  // locally, avoiding any flicker between optimistic and authoritative
+  // state.
+  const handleSortEnd = (bucket: Bucket, event: SolidDndDragEvent) => {
+    const { draggable, droppable } = event;
+    if (!draggable || !droppable) return;
+    const arr = bucket.projects;
+    const fromIdx = arr.findIndex((p) => p.id === draggable.id);
+    const toIdx = arr.findIndex((p) => p.id === droppable.id);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+    const next = arr.slice();
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    void reorderBucketProjects(
+      bucket.id,
+      next.map((p) => p.id),
+    ).catch((err) =>
+      console.warn("reorderBucketProjects failed:", err),
+    );
   };
 
   const submitNew = async () => {
@@ -253,64 +304,76 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
                   </button>
                 </div>
                 <Show when={isOpen() && bucket.projects.length > 0}>
-                  <ul class="bucket-projects">
-                    <For each={bucket.projects}>
-                      {(project, idx) => {
-                        const handleOpen = (p: Project) => {
-                          // Fire both in parallel — opening the window
-                          // and moving the at-cursor highlight are
-                          // independent (no shared state, no ordering
-                          // dependency). The cursor IPC also activates
-                          // this bucket so the .at-cursor styling
-                          // actually paints.
-                          void requestOpenProject(p.path).catch((err) =>
-                            console.error("requestOpenProject failed:", err),
-                          );
-                          void setBucketCursorToProject(bucket.id, p.id).catch(
-                            (err) =>
-                              console.error(
-                                "setBucketCursorToProject failed:",
-                                err,
-                              ),
-                          );
-                        };
-                        return (
-                          <li
-                            class={`bucket-project ${
-                              isActive() && idx() === bucket.cursor
-                                ? "at-cursor"
-                                : ""
-                            }`}
-                            onClick={() => handleOpen(project)}
-                            title={project.path}
-                          >
-                            <span class="bucket-project-name">
-                              {project.name}
-                            </span>
-                            <button
-                              type="button"
-                              class="bucket-action danger"
-                              onClick={(e) => {
-                                // Don't let the remove click bubble into
-                                // the row's open handler.
-                                e.stopPropagation();
-                                removeFromBucket(bucket.id, project.id).catch(
-                                  (err) =>
-                                    console.error(
-                                      "removeFromBucket failed:",
-                                      err,
-                                    ),
-                                );
-                              }}
-                              title="Remove from bucket"
-                            >
-                              ×
-                            </button>
-                          </li>
-                        );
-                      }}
-                    </For>
-                  </ul>
+                  <DragDropProvider
+                    onDragEnd={(e) => handleSortEnd(bucket, e)}
+                    collisionDetector={closestCenter}
+                  >
+                    <DragDropSensors />
+                    <ul class="bucket-projects">
+                      <SortableProvider ids={bucket.projects.map((p) => p.id)}>
+                        <For each={bucket.projects}>
+                          {(project, idx) => {
+                            const sortable = createSortable(project.id);
+                            const handleOpen = (p: Project) => {
+                              // Fire both in parallel — opening the window
+                              // and moving the at-cursor highlight are
+                              // independent (no shared state, no ordering
+                              // dependency). The cursor IPC also activates
+                              // this bucket so the .at-cursor styling
+                              // actually paints.
+                              void requestOpenProject(p.path).catch((err) =>
+                                console.error("requestOpenProject failed:", err),
+                              );
+                              void setBucketCursorToProject(bucket.id, p.id).catch(
+                                (err) =>
+                                  console.error(
+                                    "setBucketCursorToProject failed:",
+                                    err,
+                                  ),
+                              );
+                            };
+                            return (
+                              <li
+                                use:sortable
+                                class={`bucket-project ${
+                                  isActive() && idx() === bucket.cursor
+                                    ? "at-cursor"
+                                    : ""
+                                } ${sortable.isActiveDraggable ? "is-dragging" : ""}`}
+                                style={transformStyle(sortable.transform)}
+                                onClick={() => handleOpen(project)}
+                                title={project.path}
+                              >
+                                <span class="bucket-project-name">
+                                  {project.name}
+                                </span>
+                                <button
+                                  type="button"
+                                  class="bucket-action danger"
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    // Don't let the remove click bubble into
+                                    // the row's open handler.
+                                    e.stopPropagation();
+                                    removeFromBucket(bucket.id, project.id).catch(
+                                      (err) =>
+                                        console.error(
+                                          "removeFromBucket failed:",
+                                          err,
+                                        ),
+                                    );
+                                  }}
+                                  title="Remove from bucket"
+                                >
+                                  ×
+                                </button>
+                              </li>
+                            );
+                          }}
+                        </For>
+                      </SortableProvider>
+                    </ul>
+                  </DragDropProvider>
                 </Show>
               </div>
             );

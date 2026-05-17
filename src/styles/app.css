@@ -743,6 +743,12 @@
   color: #9a9aa3;
   border-radius: 3px;
   cursor: pointer;
+  /* Smooth neighbor-slide during drag-reorder. solid-dnd writes per-item
+     transform values on neighbours of the dragged row; the transition
+     here is what gives the slide-out-of-the-way feel instead of an
+     instant jump. The dragged row's transition is overridden below to
+     keep it locked to the cursor. */
+  transition: transform 180ms ease, background 140ms ease, color 140ms ease;
 }
 
 .bucket-project:hover {
@@ -753,6 +759,20 @@
 .bucket-project.at-cursor {
   color: var(--proj-accent, #2d5cc8);
   font-weight: 600;
+}
+
+/* Mirrors .bw-tabrow.is-dragging from the workspace — same visual
+   language (faded, lifted, ringed in the row's accent) so users see
+   the same drag-reorder affordance everywhere. Transition is reduced
+   to non-transform properties so solid-dnd's pointer-driven transform
+   isn't fighting an easing curve and rubbery-trailing the cursor. */
+.bucket-project.is-dragging {
+  opacity: 0.5;
+  z-index: 2;
+  background: #1d1d22;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4),
+              inset 0 0 0 1px var(--proj-accent, #4a4a52);
+  transition: opacity 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
 .bucket-project-name {
