@@ -1,5 +1,6 @@
 import {
   Component,
+  createEffect,
   createResource,
   createSignal,
   For,
@@ -377,15 +378,31 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
         setLightboxSrc(null);
         return;
       }
-      close();
-    } else if (e.key === "n" && (e.metaKey || e.ctrlKey)) {
+      void close();
+    } else if ((e.key === "n" || e.key === "N") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void newNote();
-    } else if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
+    } else if ((e.key === "s" || e.key === "S") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void saveNow();
     }
   };
+
+  // Listen for Esc / ⌘N / ⌘S at the WINDOW level whenever the modal is
+  // open. The previous design attached `onKeyDown` only to the overlay
+  // div, which meant the handler only fired if the keydown bubbled up
+  // THROUGH the overlay. When the modal opens via the Enter-to-focus
+  // gesture in the 3D bucket workspace, the focus is on the workspace
+  // window's body (xterm was blurred on navigate, the overlay never
+  // received programmatic focus), so Esc never bubbled through the
+  // overlay and the close-on-Esc affordance silently broke.
+  // Belt-and-suspenders: leave the overlay's onKeyDown wired too so
+  // Esc from within the editor still closes via the same handler.
+  createEffect(() => {
+    if (!open()) return;
+    window.addEventListener("keydown", onKeyDown);
+    onCleanup(() => window.removeEventListener("keydown", onKeyDown));
+  });
 
   // Delegated click handler — opens the lightbox when an inline image
   // thumbnail inside the Quill editor is clicked. The src attribute holds
