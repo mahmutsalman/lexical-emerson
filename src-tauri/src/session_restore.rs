@@ -1,13 +1,17 @@
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-// How far back of an mtime gap we tolerate when matching a tab's cwd to a
-// Claude session file. Anything older than this is assumed to be an
-// abandoned/historical conversation we shouldn't auto-resume. 48h covers
-// the common "left it overnight" / "came back after a weekend" cases while
-// still rejecting truly stale jsonl files that happen to share the cwd.
+// Absolute cutoff for considering a .jsonl plausibly recent at all. 48h
+// covers "left it overnight" / "came back after a weekend" cases while
+// rejecting jsonl files that have been sitting in the cwd for weeks.
 const SESSION_MTIME_WINDOW: Duration = Duration::from_secs(48 * 60 * 60);
+// Cluster window — once we find the newest .jsonl, only include other
+// .jsonls touched within this window of THAT newest mtime. Filters out
+// older-but-still-within-48h conversations that the user isn't actively
+// resuming. 1h is enough to keep a parallel session that was idle while
+// the user typed in another, but tight enough to exclude sessions from
+// earlier in the day.
+const ACTIVE_CLUSTER_WINDOW: Duration = Duration::from_secs(60 * 60);
 
 // Encode an absolute cwd the way Claude Code names its per-project dir under
 // `~/.claude/projects/`: every `/` becomes `-`. Verified by inspecting the
@@ -22,18 +26,26 @@ fn claude_project_dir(cwd: &str) -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".claude/projects").join(encode_cwd(cwd)))
 }
 
-// Find the most-recently-modified Claude session `.jsonl` in `cwd`'s project
-// dir that hasn't already been claimed by another tab in the same persist
-// batch. Returns the bare UUID stem (no extension) so the caller can later
-// inject `claude --resume <uuid>`. `claimed` is the running set of UUIDs
-// already assigned to prior tabs — disambiguates two tabs sharing a cwd.
-pub fn detect_claude_session(cwd: &str, claimed: &mut HashSet<String>) -> Option<String> {
-    let dir = claude_project_dir(cwd)?;
-    let entries = std::fs::read_dir(&dir).ok()?;
+// Find every Claude session `.jsonl` in `cwd`'s project dir that is within
+// the SESSION_MTIME_WINDOW, ordered newest-first. Returns just the UUID
+// stems (no extension) so callers can inject `claude --resume <uuid>`.
+//
+// Persist writes one row per returned UUID — that's how a project with
+// three active Claude conversations comes back as three tabs even if the
+// user only had one terminal tab open at quit time.
+pub fn detect_active_claude_sessions(cwd: &str) -> Vec<String> {
+    let Some(dir) = claude_project_dir(cwd) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
     let now = SystemTime::now();
-    let cutoff = now.checked_sub(SESSION_MTIME_WINDOW)?;
+    let Some(cutoff) = now.checked_sub(SESSION_MTIME_WINDOW) else {
+        return Vec::new();
+    };
 
-    let mut best: Option<(SystemTime, String)> = None;
+    let mut candidates: Vec<(SystemTime, String)> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
@@ -43,9 +55,6 @@ pub fn detect_claude_session(cwd: &str, claimed: &mut HashSet<String>) -> Option
             Some(s) => s.to_string(),
             None => continue,
         };
-        if claimed.contains(&stem) {
-            continue;
-        }
         let mtime = match entry.metadata().and_then(|m| m.modified()) {
             Ok(t) => t,
             Err(_) => continue,
@@ -53,14 +62,23 @@ pub fn detect_claude_session(cwd: &str, claimed: &mut HashSet<String>) -> Option
         if mtime < cutoff {
             continue;
         }
-        if best.as_ref().map_or(true, |(t, _)| mtime > *t) {
-            best = Some((mtime, stem));
+        candidates.push((mtime, stem));
+    }
+    // Newest first so persist writes them in the order the user is likely
+    // to want to see them (most-recent tab on the left / first restored).
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // Cluster filter: anchor on the newest .jsonl and drop anything more
+    // than ACTIVE_CLUSTER_WINDOW older than it. Without this, a project
+    // dir with five .jsonl files spread across the last day would restore
+    // five tabs even if only two were part of the current work session.
+    if let Some((newest, _)) = candidates.first().cloned() {
+        if let Some(cluster_cutoff) = newest.checked_sub(ACTIVE_CLUSTER_WINDOW) {
+            candidates.retain(|(t, _)| *t >= cluster_cutoff);
         }
     }
 
-    let (_, uuid) = best?;
-    claimed.insert(uuid.clone());
-    Some(uuid)
+    candidates.into_iter().map(|(_, s)| s).collect()
 }
 
 // Check whether the session file referenced by `claude_session_id` is still
@@ -88,51 +106,36 @@ mod tests {
     }
 
     #[test]
-    fn detect_claude_session_picks_newest_unclaimed() {
+    fn detect_active_returns_all_sessions_newest_first() {
         let tmp = tempdir();
         let cwd = "/tmp/my-fake-cwd";
         let encoded = encode_cwd(cwd);
         let claude_dir = tmp.join(".claude/projects").join(&encoded);
         fs::create_dir_all(&claude_dir).unwrap();
 
-        let now = SystemTime::now();
-
         let older = claude_dir.join("aaaaaaaa.jsonl");
         File::create(&older).unwrap();
         let newer = claude_dir.join("bbbbbbbb.jsonl");
         File::create(&newer).unwrap();
-        // Touch the second file ~1 second later so its mtime is strictly newer.
-        // We approximate by writing one extra byte and relying on file system
-        // mtime granularity.
+        // Touch the second file ~10 ms later so its mtime is strictly newer.
         std::thread::sleep(Duration::from_millis(10));
         let mut f = File::create(&newer).unwrap();
         f.write_all(b"x").unwrap();
-        let _ = now; // mtime cutoff is computed inside detect; no assertion here.
 
         std::env::set_var("HOME", tmp.to_str().unwrap());
-        let mut claimed = HashSet::new();
+        let result = detect_active_claude_sessions(cwd);
         assert_eq!(
-            detect_claude_session(cwd, &mut claimed),
-            Some("bbbbbbbb".to_string())
+            result,
+            vec!["bbbbbbbb".to_string(), "aaaaaaaa".to_string()],
+            "expected newest first, then older"
         );
-        // Second call with the same `claimed` set should fall back to the older.
-        assert_eq!(
-            detect_claude_session(cwd, &mut claimed),
-            Some("aaaaaaaa".to_string())
-        );
-        // Third call: nothing left.
-        assert_eq!(detect_claude_session(cwd, &mut claimed), None);
     }
 
     #[test]
-    fn detect_returns_none_when_dir_missing() {
+    fn detect_active_returns_empty_when_dir_missing() {
         let tmp = tempdir();
         std::env::set_var("HOME", tmp.to_str().unwrap());
-        let mut claimed = HashSet::new();
-        assert_eq!(
-            detect_claude_session("/tmp/never-existed", &mut claimed),
-            None
-        );
+        assert!(detect_active_claude_sessions("/tmp/never-existed").is_empty());
     }
 
     // Minimal tempdir helper — avoids pulling in the `tempfile` crate just for

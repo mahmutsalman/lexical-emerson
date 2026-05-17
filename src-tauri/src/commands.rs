@@ -865,14 +865,26 @@ pub fn persist_project_terminals(
         return Ok(());
     }
 
-    let mut claimed: HashSet<String> = HashSet::new();
+    // Snapshot ALL active Claude sessions per cwd, not one row per tab.
+    // Dedupe the tab cwds first so a project with 3 tabs in the same cwd
+    // doesn't enumerate the dir 3 times. Then for each unique cwd, write
+    // one row per fresh .jsonl in the claude project dir. That way a
+    // project with N active conversations comes back as N tabs on
+    // restore, even if the user only had one terminal tab open at quit.
+    let mut seen_cwds: HashSet<String> = HashSet::new();
     let mut rows: Vec<(String, Option<String>)> = Vec::new();
     for cwd in cwds {
-        let uuid = session_restore::detect_claude_session(&cwd, &mut claimed);
-        eprintln!("[persist] cwd={} detected_uuid={:?}", cwd, uuid);
-        // Claude-only filter: tabs with no detected session are skipped.
-        if uuid.is_some() {
-            rows.push((cwd, uuid));
+        if !seen_cwds.insert(cwd.clone()) {
+            continue;
+        }
+        let uuids = session_restore::detect_active_claude_sessions(&cwd);
+        eprintln!(
+            "[persist] cwd={} found {} active session(s)",
+            cwd,
+            uuids.len()
+        );
+        for uuid in uuids {
+            rows.push((cwd.clone(), Some(uuid)));
         }
     }
 
@@ -952,31 +964,56 @@ pub fn list_persisted_project_ids(
 }
 
 // Right-click → "Load active Claude sessions" action on a bucket row.
-// Finds every project in this bucket that has at least one persisted
-// terminal row and spawns its dedicated window (or focuses the
-// existing one). Each freshly-spawned project window's TerminalsView
-// then runs its own `list_persisted_terminals` on mount, which is
-// where `claude --resume <uuid>` actually gets injected.
+// Source of truth is the filesystem state of `~/.claude/projects/`, NOT
+// the persisted_terminals snapshot — that lets us pick up sessions that
+// never went through a graceful persist (app force-killed, ditto install
+// over a running process, etc.). For every project in this bucket:
 //
-// Returns the count of windows touched so the frontend can show a
-// brief confirmation if it wants to. A bucket with zero persisted
-// projects returns 0 — the caller can treat it as a no-op.
+//   1. Scan its claude project dir for .jsonl files within the active
+//      mtime window (currently 48h).
+//   2. If any found, overwrite that project's persisted_terminals rows
+//      with one row per .jsonl (newest first).
+//   3. Spawn / focus the project window. Its TerminalsView reads the
+//      rows we just wrote and injects `claude --resume <uuid>` per tab.
+//
+// Returns the count of windows opened. Projects with no active sessions
+// in the bucket are skipped silently — they don't get a window.
 #[tauri::command(rename_all = "camelCase")]
 pub fn load_active_claude_sessions_for_bucket(
     app: AppHandle,
     state: State<AppState>,
     bucket_id: i64,
 ) -> Result<usize, String> {
-    let ids = state
+    let bucket = state
         .store
-        .list_persisted_project_ids_in_bucket(bucket_id)
-        .map_err(|e| e.to_string())?;
+        .get_bucket(bucket_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("bucket {} not found", bucket_id))?;
+
     let mut count = 0usize;
-    for id in ids {
-        let proj = match state.store.get_by_id(id).map_err(|e| e.to_string())? {
-            Some(p) => p,
-            None => continue, // row in persisted_terminals but project gone
-        };
+    for proj in bucket.projects {
+        let uuids = session_restore::detect_active_claude_sessions(&proj.path);
+        if uuids.is_empty() {
+            eprintln!(
+                "[load_active] project_id={} ({}) no active sessions on disk",
+                proj.id, proj.name
+            );
+            continue;
+        }
+        let rows: Vec<(String, Option<String>)> = uuids
+            .into_iter()
+            .map(|uuid| (proj.path.clone(), Some(uuid)))
+            .collect();
+        eprintln!(
+            "[load_active] project_id={} ({}) writing {} row(s) from filesystem",
+            proj.id,
+            proj.name,
+            rows.len()
+        );
+        state
+            .store
+            .replace_persisted_terminals_for_project(proj.id, &rows)
+            .map_err(|e| e.to_string())?;
         spawn_or_focus_project_window(&app, &proj)?;
         count += 1;
     }
