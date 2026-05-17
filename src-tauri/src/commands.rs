@@ -243,6 +243,29 @@ pub fn set_project_zoom(
 }
 
 #[tauri::command]
+pub fn get_global_zoom(state: State<AppState>) -> Result<Option<f64>, String> {
+    state.store.get_global_zoom().map_err(|e| e.to_string())
+}
+
+// Broadcasts on success so every other open window updates its --ui-zoom
+// in the same animation frame. The originating window also receives the
+// event; the frontend dedupes against its current signal value.
+#[tauri::command]
+pub fn set_global_zoom(
+    app: AppHandle,
+    state: State<AppState>,
+    zoom: f64,
+) -> Result<f64, String> {
+    let clamped = zoom.clamp(0.75, 2.0);
+    state
+        .store
+        .set_global_zoom(clamped)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("zoom://changed", clamped);
+    Ok(clamped)
+}
+
+#[tauri::command]
 pub fn hide_project(state: State<AppState>, id: i64) -> Result<(), String> {
     state.store.hide_project(id).map_err(|e| e.to_string())
 }

@@ -413,6 +413,20 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     ]);
     unlistens.push(unlistenClose);
 
+    // When the window regains focus (e.g. via ⌘J / ⌘⇧J cycling), force a fit
+    // on the visible terminal. Without this, xterm's Canvas renderer keeps
+    // a stale viewport from before the WKWebView was occluded — rows render
+    // overlapped or off-by-cell. fitNow() always runs term.resize() which
+    // internally triggers a full canvas repaint even if cols/rows match.
+    const unlistenFocus = await win.onFocusChanged((event) => {
+      if (!event.payload) return;
+      const id = activeId();
+      if (!id) return;
+      const handle = handles.get(id);
+      handle?.fitNow();
+    });
+    unlistens.push(unlistenFocus);
+
     // Prime panelWidth synchronously so the first 3D toggle has correct
     // geometry, even before ResizeObserver gets its first callback.
     if (stackEl?.clientWidth) setPanelWidth(stackEl.clientWidth);

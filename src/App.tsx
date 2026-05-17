@@ -10,6 +10,7 @@ import {
 } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { BucketBar } from "./components/BucketBar";
@@ -35,7 +36,8 @@ import {
   pickFolder,
   requestOpenProject,
   setMainProject,
-  setProjectZoom,
+  getGlobalZoom,
+  setGlobalZoom,
 } from "./lib/ipc";
 import { applyPalette, isColorTag, PALETTE } from "./lib/palette";
 import type { Bucket, Project } from "./lib/types";
@@ -58,19 +60,21 @@ export const App: Component = () => {
   const [recentsKey, setRecentsKey] = createSignal(0);
   const [bucketsKey, setBucketsKey] = createSignal(0);
   const [panelsHidden, setPanelsHidden] = createSignal(false);
-  const [zoom, setZoom] = createSignal(1);
+  const [zoom, setZoom] = createSignal(1.1);
 
   const isBucketWorkspace = () => bucketWorkspaceId() !== null;
 
   // Persisted with a small debounce so holding ⌘= or ⌘- doesn't fire a write
   // per keystroke. Fire-and-forget; if the window closes before the timer
-  // resolves the row still gets written.
+  // resolves the row still gets written. Zoom is a single global value
+  // (app_meta.global_zoom), so any project window's bump broadcasts to all
+  // other open windows via the Rust-side `zoom://changed` event.
   let zoomPersistTimer: number | undefined;
-  const schedulePersistZoom = (id: number, z: number) => {
+  const schedulePersistZoom = (z: number) => {
     if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
     zoomPersistTimer = window.setTimeout(() => {
-      setProjectZoom(id, z).catch((err) =>
-        console.warn("setProjectZoom failed:", err),
+      setGlobalZoom(z).catch((err) =>
+        console.warn("setGlobalZoom failed:", err),
       );
     }, ZOOM_PERSIST_MS);
   };
@@ -154,6 +158,7 @@ export const App: Component = () => {
   let unlistenZoomIn: UnlistenFn | undefined;
   let unlistenZoomOut: UnlistenFn | undefined;
   let unlistenZoomReset: UnlistenFn | undefined;
+  let unlistenZoomBroadcast: UnlistenFn | undefined;
   let unlistenOpenFolder: UnlistenFn | undefined;
 
   onMount(async () => {
@@ -163,6 +168,16 @@ export const App: Component = () => {
       setWindowLabel(label);
     } catch (err) {
       console.warn("currentWindowLabel failed:", err);
+    }
+
+    // Adopt the persisted global zoom before any project metadata loads, so
+    // the first paint already has the right --ui-zoom. If the key isn't set
+    // yet (fresh install or pre-global-zoom DB), keep the in-memory default.
+    try {
+      const z = await getGlobalZoom();
+      if (z !== null) setZoom(clampZoom(z));
+    } catch (err) {
+      console.warn("getGlobalZoom failed:", err);
     }
 
     if (label === "main") {
@@ -215,31 +230,32 @@ export const App: Component = () => {
     });
 
     const bumpZoom = (delta: number) => {
-      const p = currentProject();
-      if (!p) return;
       const next = clampZoom(zoom() + delta);
       if (next === zoom()) return;
       setZoom(next);
-      schedulePersistZoom(p.id, next);
+      schedulePersistZoom(next);
     };
     unlistenZoomIn = await onMenuEvent("zoom-in", () => bumpZoom(+ZOOM_STEP));
     unlistenZoomOut = await onMenuEvent("zoom-out", () => bumpZoom(-ZOOM_STEP));
     unlistenZoomReset = await onMenuEvent("zoom-reset", () => {
-      const p = currentProject();
-      if (!p) return;
       setZoom(1);
-      schedulePersistZoom(p.id, 1);
+      schedulePersistZoom(1);
+    });
+
+    // Live cross-window propagation: whenever any window calls setGlobalZoom,
+    // Rust broadcasts the new value to every window (including this one). We
+    // dedupe against the current signal to avoid a no-op write loop in the
+    // window that originated the change.
+    unlistenZoomBroadcast = await listen<number>("zoom://changed", (event) => {
+      const next = clampZoom(event.payload);
+      if (next === zoom()) return;
+      setZoom(next);
     });
   });
 
-  // Adopt the loaded project's saved zoom and color whenever currentProject
-  // changes. Both effects also run on initial load.
-  createEffect(() => {
-    const p = currentProject();
-    if (!p) return;
-    const z = typeof p.zoom === "number" && p.zoom > 0 ? p.zoom : 1;
-    setZoom(clampZoom(z));
-  });
+  // Apply this window's color theme whenever currentProject changes. Zoom is
+  // no longer adopted per-project — it's a single global value (app_meta)
+  // seeded in onMount and kept in sync across windows via `zoom://changed`.
   createEffect(() => {
     // Drive UI scale via a CSS variable consumed by individual chrome
     // selectors (title-bar, sidebar, file-tree, bucket-bar, terminal tabs).
@@ -273,6 +289,7 @@ export const App: Component = () => {
     unlistenZoomIn?.();
     unlistenZoomOut?.();
     unlistenZoomReset?.();
+    unlistenZoomBroadcast?.();
     unlistenOpenFolder?.();
     if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
     if (isMain()) {

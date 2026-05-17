@@ -112,6 +112,14 @@ export async function setProjectZoom(
   return await invoke<Project>("set_project_zoom", { id, zoom });
 }
 
+export async function getGlobalZoom(): Promise<number | null> {
+  return await invoke<number | null>("get_global_zoom");
+}
+
+export async function setGlobalZoom(zoom: number): Promise<number> {
+  return await invoke<number>("set_global_zoom", { zoom });
+}
+
 export async function hideProject(id: number): Promise<void> {
   await invoke("hide_project", { id });
 }

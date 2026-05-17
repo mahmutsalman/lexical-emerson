@@ -463,6 +463,29 @@ impl Store {
         }
     }
 
+    pub fn set_global_zoom(&self, zoom: f64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "INSERT INTO app_meta (key, value) VALUES ('global_zoom', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![zoom.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_global_zoom(&self) -> Result<Option<f64>> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        match conn.query_row(
+            "SELECT value FROM app_meta WHERE key = 'global_zoom'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(s) => Ok(s.parse::<f64>().ok()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     // Advance the active bucket's cursor by `direction` (+1 or -1), persist the
     // new cursor, and return the (project_id, project_path, project_name) at
     // that position. Returns None if there's no active bucket or it's empty.
