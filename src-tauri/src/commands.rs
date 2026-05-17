@@ -986,6 +986,17 @@ pub fn list_persisted_project_ids(
         .map_err(|e| e.to_string())
 }
 
+// Read-only probe: return every Claude session UUID currently active in
+// `cwd`, newest-first. Used by D1 auto-suspend in TerminalsView to decide
+// whether a tab can be safely suspended (we only suspend tabs whose cwd
+// has a detectable `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`, so we
+// know what UUID to inject into `claude --resume` on resume). An empty
+// result means "no Claude conversation in this cwd" — caller skips suspend.
+#[tauri::command(rename_all = "camelCase")]
+pub fn detect_claude_sessions_for_cwd(cwd: String) -> Vec<String> {
+    session_restore::detect_active_claude_sessions(&cwd)
+}
+
 // Right-click → "Load active Claude sessions" action on a bucket row.
 // Source of truth is the filesystem state of `~/.claude/projects/`, NOT
 // the persisted_terminals snapshot — that lets us pick up sessions that

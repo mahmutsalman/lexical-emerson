@@ -103,6 +103,7 @@ fn main() {
             commands::delete_persisted_terminals_for_project,
             commands::list_persisted_project_ids,
             commands::load_active_claude_sessions_for_bucket,
+            commands::detect_claude_sessions_for_cwd,
         ])
         .setup(|app| {
             let app_data = app

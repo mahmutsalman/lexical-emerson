@@ -327,6 +327,16 @@ export async function loadActiveClaudeSessionsForBucket(
   });
 }
 
+// Read-only probe: returns every Claude session UUID currently active in
+// `cwd`, newest-first. Used by D1 auto-suspend in TerminalsView to find
+// the UUID a tab can be resumed with after its PTY is killed. Empty
+// result means "no active Claude in this cwd" — caller skips suspend.
+export async function detectClaudeSessionsForCwd(
+  cwd: string,
+): Promise<string[]> {
+  return await invoke<string[]>("detect_claude_sessions_for_cwd", { cwd });
+}
+
 // --- notes -----------------------------------------------------------------
 
 export async function listNotes(projectId: number): Promise<NoteSummary[]> {

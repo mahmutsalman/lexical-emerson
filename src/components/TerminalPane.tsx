@@ -58,6 +58,14 @@ export interface TerminalPaneProps {
   // diff tab arrays in the close path. Idempotent on the caller side.
   onDeregister?: () => void;
   onActivity?: () => void;
+  // Per-event activity hooks used by D1 auto-suspend in TerminalsView.
+  // onInput fires on every user keystroke captured by term.onData (raw,
+  // not debounced — onActivity is debounced for the project-active ping).
+  // onOutput fires on every PTY data chunk arriving from Rust, so the
+  // parent can distinguish "idle" from "mid-response" (claude is currently
+  // streaming output) when deciding whether a tab is suspendable.
+  onInput?: () => void;
+  onOutput?: () => void;
   zoom?: Accessor<number>;
   accent?: Accessor<string | null>;
 }
@@ -207,6 +215,7 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
       const bytes = base64ToBytes(evt.data_base64);
       // xterm.write accepts string or Uint8Array; Uint8Array is faster.
       term.write(bytes);
+      props.onOutput?.();
     });
 
     unlistenExit = await onPtyExit((evt) => {
@@ -221,6 +230,7 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
         console.error("write_terminal failed:", err);
       });
       props.onActivity?.();
+      props.onInput?.();
     });
 
     const fitNow = () => {

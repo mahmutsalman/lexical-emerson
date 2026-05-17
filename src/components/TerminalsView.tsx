@@ -17,6 +17,7 @@ import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
 import {
   bytesToBase64,
+  detectClaudeSessionsForCwd,
   listPersistedTerminals,
   markActive,
   onMenuEvent,
@@ -33,6 +34,25 @@ interface Tab {
   projectPath: string;
   projectId: number;
 }
+
+// Recorded against a suspended tab so the user (or our auto-resume path) can
+// later inject `claude --resume <uuid>` into a freshly-spawned PTY. The cwd is
+// snapshotted so we don't risk reading a stale Tab.cwd after the user has
+// re-pointed the same tab elsewhere via shell `cd` between suspend and resume.
+interface SuspendedInfo {
+  claudeSessionId: string;
+  cwd: string;
+}
+
+// D1 — auto-suspend tuning. Hardcoded for v1; settings layer deferred (we
+// only ship these once we know the defaults feel right in real use).
+const AUTO_SUSPEND_MIN = 20;
+// One walk per minute is enough — the suspend boundary is N minutes, so a
+// 60s sampling rate adds at most ~1 min of slack before suspension fires.
+const AUTO_SUSPEND_INTERVAL_MS = 60_000;
+// Below this since last PTY output, assume Claude is mid-response. Suspending
+// here would cut off a streaming reply. 30 s covers typical inference bursts.
+const MID_RESPONSE_THRESHOLD_MS = 30_000;
 
 let tabCounter = 0;
 const newTabId = () => `tab-${++tabCounter}`;
@@ -70,6 +90,27 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   const [is3dByProject, setIs3dByProject] = createSignal<
     Record<string, boolean>
   >({});
+  // D1 — suspended tabs. When an entry is present here, the corresponding
+  // Tab in allTabs stays in the array (preserving order + tab title chrome)
+  // but its TerminalPane is unmounted (xterm + PTY torn down). The
+  // SuspendedPlaceholder renders in its place; clicking it triggers resume.
+  const [suspendedByTab, setSuspendedByTab] = createSignal<
+    Record<string, SuspendedInfo>
+  >({});
+  // Per-tab activity timestamps fed by TerminalPane's onInput/onOutput
+  // callbacks. Read by the idle-check tick to decide suspend candidates.
+  // Default-undefined entries are read as "use mountTsByTab as the baseline."
+  const [lastInputAtByTab, setLastInputAtByTab] = createSignal<
+    Record<string, number>
+  >({});
+  const [lastOutputAtByTab, setLastOutputAtByTab] = createSignal<
+    Record<string, number>
+  >({});
+  // Plain Map (not reactive) — only read inside the idle tick and on
+  // resume. Keeps a Date.now() per tab id from the moment a tab mounts
+  // so a tab with no input AND no output yet is still treated as having
+  // a finite "since when have we been idle?" baseline rather than NaN.
+  const mountTsByTab = new Map<string, number>();
   const [panelWidth, setPanelWidth] = createSignal(800);
   // True while we're checking SQLite for persisted tabs for this project.
   // Default true so the "ensure ≥1 tab" effect doesn't auto-spawn a stray
@@ -155,8 +196,106 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       projectPath: props.projectPath,
       projectId: props.projectId,
     };
+    mountTsByTab.set(tab.id, Date.now());
     setAllTabs((prev) => [...prev, tab]);
     setActiveForCurrent(tab.id);
+  };
+
+  // D1 activity tracking — wired into TerminalPane's onInput/onOutput.
+  const handleTabInput = (tabId: string) => {
+    setLastInputAtByTab((prev) => ({ ...prev, [tabId]: Date.now() }));
+  };
+  const handleTabOutput = (tabId: string) => {
+    setLastOutputAtByTab((prev) => ({ ...prev, [tabId]: Date.now() }));
+  };
+
+  // Suspend a tab: detect its current Claude session UUID, kill the PTY,
+  // and mark the tab so the next render swaps TerminalPane for a placeholder.
+  // No-op when no Claude session is detectable in the cwd — we wouldn't
+  // know what UUID to resume with, so we leave the PTY alive. The act of
+  // setting suspendedByTab will trigger Solid to unmount the TerminalPane,
+  // and TerminalPane's onCleanup calls closeTerminal(sid) for us. We still
+  // call unregisterTerminal first so the global registry never briefly
+  // points at a soon-to-die PTY for a tab whose UI is already gone.
+  const suspendTab = async (tabId: string) => {
+    const tab = allTabs().find((t) => t.id === tabId);
+    if (!tab) return;
+    if (suspendedByTab()[tabId]) return;
+    let uuid: string | undefined;
+    try {
+      const uuids = await detectClaudeSessionsForCwd(tab.cwd);
+      uuid = uuids[0];
+    } catch (err) {
+      console.warn("[suspend] detect failed:", err);
+      return;
+    }
+    if (!uuid) {
+      console.info("[suspend] no Claude session in cwd, skip:", tab.cwd);
+      return;
+    }
+    const sid = sessionIdByTab()[tabId];
+    if (sid) {
+      unregisterTerminal(sid).catch(() => {});
+    }
+    handles.delete(tabId);
+    setSessionIdByTab((prev) => {
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
+    setSuspendedByTab((prev) => ({
+      ...prev,
+      [tabId]: { claudeSessionId: uuid, cwd: tab.cwd },
+    }));
+    console.info("[suspend] tab", tabId, "→ paused", { uuid, cwd: tab.cwd });
+  };
+
+  // Resume: queue the post-spawn `claude --resume <uuid>` command BEFORE
+  // unsetting the suspended flag, so the moment Solid mounts a fresh
+  // TerminalPane and handlePaneSpawned runs, the resume command is waiting
+  // in postSpawnByTab[tabId] ready to inject. Reset the activity stamps
+  // and mount-baseline to "now" so the just-resumed tab isn't immediately
+  // a suspend candidate again on the next idle-check tick.
+  const resumeTab = (tabId: string) => {
+    const info = suspendedByTab()[tabId];
+    if (!info) return;
+    setPostSpawnByTab((prev) => ({
+      ...prev,
+      [tabId]: `claude --resume ${info.claudeSessionId}\n`,
+    }));
+    setSuspendedByTab((prev) => {
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
+    const now = Date.now();
+    setLastOutputAtByTab((prev) => ({ ...prev, [tabId]: now }));
+    setLastInputAtByTab((prev) => ({ ...prev, [tabId]: now }));
+    mountTsByTab.set(tabId, now);
+    console.info("[resume] tab", tabId, "→ resuming", info);
+  };
+
+  // Idle walk: one tick = one scan of this window's tabs against the
+  // suspend rule. Protection: never suspend the active tab when its
+  // window is focused (the user might be about to type). Mid-response
+  // guard: never suspend a tab that emitted PTY output in the last
+  // MID_RESPONSE_THRESHOLD_MS (Claude is likely streaming a reply).
+  const idleCheckTick = () => {
+    const now = Date.now();
+    const windowFocused = document.hasFocus();
+    const active = activeId();
+    for (const tab of projectTabs()) {
+      if (suspendedByTab()[tab.id]) continue;
+      if (windowFocused && tab.id === active) continue;
+      const baseline = mountTsByTab.get(tab.id) ?? now;
+      const lastIn = lastInputAtByTab()[tab.id] ?? baseline;
+      const lastOut = lastOutputAtByTab()[tab.id] ?? baseline;
+      const lastTouch = Math.max(lastIn, lastOut);
+      const idleMin = (now - lastTouch) / 60_000;
+      if (idleMin < AUTO_SUSPEND_MIN) continue;
+      if (now - lastOut < MID_RESPONSE_THRESHOLD_MS) continue;
+      void suspendTab(tab.id);
+    }
   };
 
   // Called by TerminalPane once a fresh PTY spawns. Records the session id
@@ -232,6 +371,24 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       delete next[id];
       return next;
     });
+    // D1 cleanup — a tab being explicitly closed shouldn't leave its
+    // suspend sidecar behind to bloat the records over time.
+    setSuspendedByTab((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setLastInputAtByTab((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setLastOutputAtByTab((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    mountTsByTab.delete(id);
     setAllTabs((prev) => prev.filter((t) => t.id !== id));
 
     // Re-select within the project the closed tab belonged to.
@@ -332,10 +489,14 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
           projectId: props.projectId,
         }));
         const postSpawn: Record<string, string> = {};
+        const now = Date.now();
         for (let i = 0; i < list.length; i++) {
           postSpawn[newTabs[i].id] = buildResumeCommand(
             list[i].claude_session_id,
           );
+          // D1 — restored tabs need a mount baseline too so the idle-check
+          // doesn't immediately treat them as 20 min old.
+          mountTsByTab.set(newTabs[i].id, now);
         }
         setPostSpawnByTab((prev) => ({ ...prev, ...postSpawn }));
         setAllTabs((prev) => [...prev, ...newTabs]);
@@ -458,10 +619,20 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     };
     stackEl.addEventListener("wheel", onWheel, { passive: false });
 
+    // D1 — start the idle-check loop. window.setInterval returns a number
+    // ID; cleared in onCleanup. The tick is cheap (a single signal read +
+    // arithmetic per tab, then async suspendTab for each candidate), so
+    // running it in every project window is fine.
+    const idleInterval = window.setInterval(
+      idleCheckTick,
+      AUTO_SUSPEND_INTERVAL_MS,
+    );
+
     onCleanup(() => {
       unlistens.forEach((u) => u());
       ro.disconnect();
       stackEl.removeEventListener("wheel", onWheel);
+      clearInterval(idleInterval);
     });
   });
 
@@ -472,11 +643,22 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
           {(tab, idx) => (
             <button
               type="button"
-              class={`terminal-tab ${tab.id === activeId() ? "active" : ""}`}
-              onClick={() => setActiveForCurrent(tab.id)}
-              title={tab.cwd}
+              class={`terminal-tab ${tab.id === activeId() ? "active" : ""} ${
+                suspendedByTab()[tab.id] ? "suspended" : ""
+              }`}
+              onClick={() => {
+                setActiveForCurrent(tab.id);
+                // Click on a suspended tab's title also wakes it — saves a
+                // second click through the placeholder for the common case
+                // of "I'm focusing this tab to use it again."
+                if (suspendedByTab()[tab.id]) resumeTab(tab.id);
+              }}
+              title={suspendedByTab()[tab.id] ? `${tab.cwd} — suspended (click to resume)` : tab.cwd}
             >
               <span class="tab-label">
+                <Show when={suspendedByTab()[tab.id]}>
+                  <span class="tab-suspend-glyph" aria-label="suspended">◌</span>{" "}
+                </Show>
                 {idx() + 1}. {basename(tab.cwd)}
               </span>
               <span
@@ -571,16 +753,29 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
                   }`}
                   style={hostStyle()}
                 >
-                  <TerminalPane
-                    cwd={tab.cwd}
-                    projectId={tab.projectId}
-                    projectPath={tab.projectPath}
-                    onReady={(h) => handles.set(tab.id, h)}
-                    onActivity={markActivityForCurrent}
-                    onSpawned={(sid) => handlePaneSpawned(tab.id, sid)}
-                    zoom={props.zoom}
-                    accent={props.accent}
-                  />
+                  <Show
+                    when={!suspendedByTab()[tab.id]}
+                    fallback={
+                      <SuspendedPlaceholder
+                        cwd={tab.cwd}
+                        info={suspendedByTab()[tab.id]}
+                        onResume={() => resumeTab(tab.id)}
+                      />
+                    }
+                  >
+                    <TerminalPane
+                      cwd={tab.cwd}
+                      projectId={tab.projectId}
+                      projectPath={tab.projectPath}
+                      onReady={(h) => handles.set(tab.id, h)}
+                      onActivity={markActivityForCurrent}
+                      onInput={() => handleTabInput(tab.id)}
+                      onOutput={() => handleTabOutput(tab.id)}
+                      onSpawned={(sid) => handlePaneSpawned(tab.id, sid)}
+                      zoom={props.zoom}
+                      accent={props.accent}
+                    />
+                  </Show>
                 </div>
               );
             }}
@@ -595,3 +790,37 @@ function basename(path: string): string {
   const parts = path.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
+
+// Rendered in place of TerminalPane when a tab is suspended. Clicking
+// anywhere on the placeholder calls resumeTab, which mounts a fresh
+// TerminalPane in this slot — that pane spawns a new PTY and gets
+// `claude --resume <uuid>` injected via postSpawnByTab. The placeholder
+// also self-focuses on mount so the user can Enter / Space to resume
+// via keyboard once their attention is here.
+const SuspendedPlaceholder: Component<{
+  cwd: string;
+  info: SuspendedInfo;
+  onResume: () => void;
+}> = (props) => {
+  let btnEl!: HTMLButtonElement;
+  onMount(() => {
+    // Single-frame defer so we don't fight with the focus-routing rules
+    // in App / TerminalsView during the suspended→placeholder transition.
+    queueMicrotask(() => btnEl?.focus());
+  });
+  return (
+    <button
+      type="button"
+      class="terminal-suspended"
+      ref={btnEl}
+      onClick={() => props.onResume()}
+      title={`Resume claude --resume ${props.info.claudeSessionId}`}
+    >
+      <span class="terminal-suspended-glyph" aria-hidden="true">◌</span>
+      <span class="terminal-suspended-title">Suspended (idle)</span>
+      <span class="terminal-suspended-subtitle">
+        Click or press Enter to resume — claude --resume {props.info.claudeSessionId.slice(0, 8)}…
+      </span>
+    </button>
+  );
+};
