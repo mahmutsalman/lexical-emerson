@@ -158,6 +158,44 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
   // here when mode() changes.
   const handles = new Map<string, TerminalHandle>();
 
+  // Park keyboard focus on the workspace container after a 3D navigation
+  // (or any other time we need to defensively pull focus off xterm).
+  //
+  // xterm.js routes keystrokes through an offscreen .xterm-helper-textarea
+  // owned by each Terminal instance. When the user ⌘⌥-navigates between
+  // rings/terminals in 3D mode, the previously-facing pane gets rotated
+  // out of view via CSS transform — but the textarea inside it retains
+  // browser focus, so the user's next keystroke still gets delivered to
+  // the hidden terminal. The user lived this exact failure: typed
+  // "ddsdsdsd…" into what they thought was the facing pane, then
+  // navigated and found the keystrokes parked in the next terminal.
+  //
+  // Calling .blur() on the .xterm host element doesn't always cascade to
+  // the inner textarea in WebKit, so we find the focused element via
+  // document.activeElement and blur it directly. Then we anchor focus to
+  // .bw-stack (tabIndex=-1, outline:none) so the next keystroke is
+  // delivered to our window-level onWorkspaceKey handler, which can
+  // route correctly.
+  const parkFocus = () => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) {
+      try {
+        active.blur();
+      } catch {
+        // ignore — blur should be safe but some custom elements throw
+      }
+    }
+    if (stackEl) {
+      try {
+        stackEl.focus({ preventScroll: true });
+      } catch {
+        // ignore — focusing a non-focusable element throws in some
+        // browsers; we set tabIndex=-1 to make it focusable, but if the
+        // ref isn't bound yet we'd rather no-op than crash.
+      }
+    }
+  };
+
   const projects = createMemo<Project[]>(() => bucket()?.projects ?? []);
 
   const activeProject = (): Project | null =>
@@ -279,6 +317,18 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
         if (activeChanged) setActiveByProject(nextActive);
       });
 
+      // Prune any handle-map entries whose tabs no longer exist. Each
+      // surviving TerminalPane's onCleanup ALSO calls onDeregister for
+      // itself, but reconcile can drop a tab without triggering Solid
+      // unmount in the same tick (e.g. when an attached tab's PTY dies
+      // and registry pruning fires terminals://changed). Belt-and-braces
+      // sweep here keeps `handles` aligned with `tabs` regardless of
+      // teardown order.
+      const surviving = new Set(nextTabs.map((t) => t.id));
+      for (const id of Array.from(handles.keys())) {
+        if (!surviving.has(id)) handles.delete(id);
+      }
+
       // Surface the total registry size for the diagnostic strip.
       try {
         const all = await listAllRegisteredTerminals();
@@ -364,6 +414,7 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
       delete next[tab.id];
       return next;
     });
+    handles.delete(tab.id);
     if (!sid) return;
     try {
       await unregisterTerminal(sid);
@@ -402,6 +453,7 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
       const nextIdx = (currentIdx + delta + total) % total;
       const nextId = nextIdx === 0 ? NOTES_SENTINEL : arr[nextIdx - 1].id;
       setActiveForProject(p.path, nextId);
+      parkFocus();
       return;
     }
     if (arr.length < 2) return;
@@ -416,6 +468,15 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     const n = projects().length;
     if (n < 2) return;
     setActiveProjectIdx((i) => (i + delta + n) % n);
+    // Sync park: the createEffect that watches activeProjectIdx() also
+    // parks focus, but it runs on Solid's microtask flush — fast enough
+    // for most cases, but a user mashing ⌘⌥↓ ↵ in a single frame can
+    // beat it. Calling parkFocus() here makes the focus shift
+    // synchronous with the navigation so a same-frame Enter can never
+    // land on a stale xterm. parkFocus() is idempotent and a no-op in
+    // 2D mode (where there's nothing focusable behind a transformed
+    // pane).
+    if (mode() === "3d") parkFocus();
   };
 
   // Commit a drag-reorder: rebuild the project-id list in the desired
@@ -549,14 +610,7 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     if (mode() !== "3d") return;
     activeTabId();
     activeProjectIdx();
-
-    const active = document.activeElement;
-    if (
-      active instanceof HTMLElement &&
-      active.closest(".bw-pane .xterm") !== null
-    ) {
-      active.blur();
-    }
+    parkFocus();
   });
 
   // Also fit any newly-ready pane against the current layout — without
@@ -659,6 +713,15 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
       if (mode() !== "3d") return;
       if (e.metaKey || e.altKey || e.ctrlKey) return;
 
+      // If a modal is open, it owns input. Bail before touching focus —
+      // otherwise this handler races the modal's own keydown listener and
+      // can yank focus to a terminal mid-typing. The overlay divs are
+      // only rendered while their respective open() signal is true, so a
+      // pure DOM check is the cheapest and most reliable signal here
+      // (no extra state plumbing between BucketWorkspace and the modal
+      // components).
+      if (document.querySelector(".notes-overlay, .timer-overlay")) return;
+
       const active = document.activeElement;
       const xtermFocused =
         active instanceof HTMLElement &&
@@ -731,6 +794,19 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
   };
   const perspectivePx = () => Math.max(panelWidth() * 1.2, 1000);
   const ringHeightPx = () => Math.max(360, panelWidth() * 0.42);
+  // Domed/fan arrangement: slots farther from facing get translated
+  // upward in the ring's local Y. Facing slot stays at the ring's
+  // baseline; edge slots lift by `ringHeightPx() * DOME_LIFT_FRAC`.
+  // Returns 0 when |angle| is 0 (facing) and the full lift at the
+  // arc's extreme. Proportional to ringHeight so the dome stays
+  // visually consistent under window resize.
+  const DOME_LIFT_FRAC = 0.18;
+  const domeLiftPx = (angleDeg: number, n: number) => {
+    const half = arcDeg(n) / 2;
+    if (half <= 0) return 0;
+    const ratio = Math.min(1, Math.abs(angleDeg) / half);
+    return ratio * ringHeightPx() * DOME_LIFT_FRAC;
+  };
   // Center-of-stack on the active ring: translate so the active is at y=0
   // in viewport coordinates, regardless of which ring index we're on.
   const stackTranslateY = () =>
@@ -860,7 +936,13 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                 }
                 title={proj().path}
               >
-                {proj().name}
+                <span class="bw-project-chip-name">{proj().name}</span>
+                <span
+                  class="bw-project-chip-pos"
+                  title={`Project ${activeProjectIdx() + 1} of ${projects().length} in this bucket`}
+                >
+                  {activeProjectIdx() + 1}/{projects().length}
+                </span>
               </div>
             )}
           </Show>
@@ -1076,6 +1158,7 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
           <div
             class="bw-stack"
             ref={stackEl}
+            tabIndex={-1}
             style={
               mode() === "3d"
                 ? { perspective: `${perspectivePx()}px` }
@@ -1155,11 +1238,22 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                                 : ""
                             }`}
                             style={
-                              {
-                                display: "flex",
-                                transform: `rotateY(${slotOffsetDeg(0, arr().length + 1)}deg) translateZ(${radiusFor(arr().length + 1)}px)`,
-                                "--pane-accent": paneAccent() ?? "",
-                              } as Record<string, string>
+                              (() => {
+                                const n = arr().length + 1;
+                                const angle = slotOffsetDeg(0, n);
+                                const r = radiusFor(n);
+                                const lift = domeLiftPx(angle, n);
+                                return {
+                                  display: "flex",
+                                  // Notes face lives at slot 0 (leftmost
+                                  // slot, max |angle|), so the dome lift
+                                  // sits it visibly high-left — exactly
+                                  // the "fan opening upward" arrangement
+                                  // the user asked for.
+                                  transform: `rotateY(${angle}deg) translateZ(${r}px) translateY(${-lift}px)`,
+                                  "--pane-accent": paneAccent() ?? "",
+                                } as Record<string, string>;
+                              })()
                             }
                           >
                             <ProjectNotesPanel
@@ -1229,10 +1323,18 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                               }
                               const angle = slotOffsetDeg(ti() + 1, n);
                               const r = radiusFor(n);
+                              const lift = domeLiftPx(angle, n);
                               return {
                                 ...base,
                                 display: "flex",
-                                transform: `rotateY(${angle}deg) translateZ(${r}px)`,
+                                // translateY runs in the slot's local
+                                // frame after rotateY. Since rotateY
+                                // preserves the Y axis, this lifts the
+                                // slot vertically in world space by the
+                                // same amount regardless of its
+                                // rotateY — exactly what the domed
+                                // arrangement needs.
+                                transform: `rotateY(${angle}deg) translateZ(${r}px) translateY(${-lift}px)`,
                               };
                             };
                             return (
@@ -1257,6 +1359,7 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                                   onReady={(h) =>
                                     registerHandle(tab.id, h)
                                   }
+                                  onDeregister={() => handles.delete(tab.id)}
                                   closeOnUnmount={false}
                                 />
                               </div>

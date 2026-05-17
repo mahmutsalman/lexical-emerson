@@ -109,6 +109,7 @@
 }
 .bucket-workspace.mode-3d .bw-project-chip {
   display: inline-flex;
+  gap: 8px;
   position: absolute;
   top: 8px;
   left: 12px;
@@ -133,6 +134,33 @@
   pointer-events: none;
   opacity: 1;
   transition: opacity 180ms ease;
+}
+
+/* Position pill inside the project chip: "2/6" — tells the user where the
+   active project sits in the bucket's ordered list so ⌘⌥↑/↓ navigation
+   has a stable frame of reference. Muted styling (tabular-nums, low
+   contrast, smaller font) so it reads as supporting metadata, not as
+   competing chrome with the project name. */
+.bw-project-chip-name {
+  /* Cap the name so very long project names don't push the position pill
+     off-screen on narrow windows. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.bw-project-chip-pos {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 500;
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.02em;
 }
 
 /* Fade the chip out whenever the auto-hidden 3D header is being
@@ -537,6 +565,16 @@
   background: #0e0e10;
 }
 
+/* The workspace container is made focusable (tabIndex=-1) so we can
+   park keyboard focus here after a 3D navigation — see parkFocus()
+   in BucketWorkspace.tsx. Suppress the default focus ring; the parked
+   state is intentionally invisible (it's only there to prevent stale
+   xterm focus, not to indicate a UI control). */
+.bw-stack:focus,
+.bw-stack:focus-visible {
+  outline: none;
+}
+
 
 .bw-rings {
   position: absolute;
@@ -612,7 +650,16 @@
 }
 
 .bw-pane.is-3d {
-  inset: 0 19%;
+  /* Pane width is intentionally a bit narrower than its cylinder slot.
+     `FACE_WIDTH_FRAC = 0.62` in BucketWorkspace.tsx fixes the slot's
+     tangential width (= 62% of panel width) by way of the cylinder
+     radius. Setting inset: 0 21% makes the pane 58% wide instead — so
+     each side of the pane has ~2% air relative to the slot, producing
+     ~4% of visible space between two adjacent facing panes. The rotation
+     animation reads MUCH more clearly with that gap; without it,
+     left/right neighbours appear glued to the facing pane and the swing
+     looks like a slide rather than a rotation. */
+  inset: 0 21%;
   display: flex;
   backface-visibility: hidden;
   pointer-events: none;

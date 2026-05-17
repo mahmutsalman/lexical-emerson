@@ -4,7 +4,6 @@ import type { Accessor } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { CanvasAddon } from "@xterm/addon-canvas";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -54,6 +53,10 @@ export interface TerminalPaneProps {
   // registry write — handy for sidecar tracking in the parent.
   onSpawned?: (sessionId: string) => void;
   onReady?: (handle: TerminalHandle) => void;
+  // Fired exactly once when the pane is being torn down. Lets parents
+  // (specifically BucketWorkspace) prune the handle map without having to
+  // diff tab arrays in the close path. Idempotent on the caller side.
+  onDeregister?: () => void;
   onActivity?: () => void;
   zoom?: Accessor<number>;
   accent?: Accessor<string | null>;
@@ -135,37 +138,21 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
 
     term.open(hostEl);
 
-    // WebGL renderer must be loaded AFTER open() — needs a live canvas. Falls
-    // back to canvas if WebGL isn't available (e.g. missing entitlement).
-    //
-    // On context LOSS (the page exceeded WebKit's ~16 concurrent WebGL
-    // contexts cap — happens when the bucket workspace AND multiple
-    // per-project windows are open simultaneously, each running their
-    // own xterm instances) we dispose the dead addon AND load the
-    // CanvasAddon so the terminal keeps rendering. Canvas is slower but
-    // uses no WebGL context, so it survives the cap.
-    const termRef = term;
-    const loadCanvasFallback = () => {
-      try {
-        termRef.loadAddon(new CanvasAddon());
-      } catch (err) {
-        console.warn("TerminalPane: canvas fallback failed:", err);
-      }
-    };
+    // Always use the Canvas renderer. The WebGL renderer is faster on
+    // heavy output, but xterm's WebGL <canvas> gets promoted to its own
+    // GPU composited layer when nested inside ancestors with
+    // `transform-style: preserve-3d` + active 3D transforms (the bucket
+    // workspace's rings/cylinder/pane stack). WebKit then doesn't
+    // re-composite the layer on subsequent draw calls — the user types,
+    // the buffer updates, but the canvas appears frozen until a
+    // `fitAddon.fit()` triggers reflow. Switching to CanvasAddon
+    // sidesteps the issue entirely: the 2D canvas's drawing surface and
+    // its composited layer stay in sync. Acceptable trade-off for a
+    // Claude-Code launcher with moderate terminal throughput.
     try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        try {
-          webgl.dispose();
-        } catch {
-          // already disposed
-        }
-        loadCanvasFallback();
-      });
-      termRef.loadAddon(webgl);
+      term.loadAddon(new CanvasAddon());
     } catch (err) {
-      console.warn("WebGL renderer unavailable; falling back to canvas:", err);
-      loadCanvasFallback();
+      console.warn("TerminalPane: canvas addon failed; falling back to DOM renderer:", err);
     }
 
     fitAddon.fit();
@@ -274,7 +261,23 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
     });
     resizeObserver.observe(hostEl);
 
-    term.focus();
+    // Auto-focus xterm on mount, but ONLY when this pane is the visually
+    // facing one (or we're outside 3D mode where every pane is its own
+    // visible terminal). Without this gate, a pane that mounts inside a
+    // rotated-away cylinder slot — e.g. when reconcile attaches a tab
+    // spawned by another window, or when the bucket workspace boots and
+    // mounts every project's tabs at once — steals keyboard focus from
+    // whatever the user is currently looking at. The user then types
+    // into a hidden terminal until they navigate to it and discover
+    // their keystrokes parked there. See ADR planning notes
+    // /Users/mahmutsalman/.claude/plans/image-2-and-also-tender-kazoo.md
+    // for the failure mode.
+    const closestPane = hostEl.closest(".bw-pane");
+    const inThreeD = closestPane?.classList.contains("is-3d") ?? false;
+    const isFacing = closestPane?.classList.contains("is-facing") ?? false;
+    if (!inThreeD || isFacing) {
+      term.focus();
+    }
   });
 
   // Update xterm theme (cursor + selection bg) when the project's accent
@@ -324,6 +327,14 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
     }
     term?.dispose();
     term = undefined;
+    // Notify the parent so it can drop any cached handle pointing at the
+    // about-to-be-disposed pane. Wrapped in try/catch because consumer
+    // code shouldn't block xterm teardown.
+    try {
+      props.onDeregister?.();
+    } catch (err) {
+      console.warn("TerminalPane onDeregister threw:", err);
+    }
   });
 
   return <div class="xterm" ref={hostEl} />;

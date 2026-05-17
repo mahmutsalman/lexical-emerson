@@ -372,8 +372,16 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (!open()) return;
+    // stopImmediatePropagation prevents the bucket workspace's
+    // onWorkspaceKey listener — which is registered on `window` and may
+    // run after us depending on subscription order — from also reacting
+    // to the SAME keystroke and yanking focus to a terminal. The DOM
+    // overlay check in onWorkspaceKey already short-circuits the
+    // workspace handler, but this is belt-and-braces in case the modal
+    // ever renders without its `.notes-overlay` wrapper for some path.
     if (e.key === "Escape") {
       e.preventDefault();
+      e.stopImmediatePropagation();
       if (lightboxSrc() != null) {
         setLightboxSrc(null);
         return;
@@ -381,9 +389,11 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
       void close();
     } else if ((e.key === "n" || e.key === "N") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
+      e.stopImmediatePropagation();
       void newNote();
     } else if ((e.key === "s" || e.key === "S") && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
+      e.stopImmediatePropagation();
       void saveNow();
     }
   };

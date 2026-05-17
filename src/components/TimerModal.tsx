@@ -91,13 +91,20 @@ export const TimerModal: Component<TimerModalProps> = (props) => {
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (!open()) return;
+    // stopImmediatePropagation: bucket workspace's onWorkspaceKey listens
+    // on window for Enter/Esc too. The DOM-overlay check there already
+    // short-circuits when our .timer-overlay is rendered, but stopping
+    // propagation here belt-and-braces it in case subscription order or
+    // future refactors expose us to a race.
     if (e.key === "Escape") {
       e.preventDefault();
+      e.stopImmediatePropagation();
       close();
       return;
     }
     if (e.key === "Enter") {
       e.preventDefault();
+      e.stopImmediatePropagation();
       handleEnter();
     }
   };
