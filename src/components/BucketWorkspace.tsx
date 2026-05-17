@@ -38,6 +38,10 @@ import { BucketWorkspaceDebugLog } from "./BucketWorkspaceDebugLog";
 import { NotesModal } from "./NotesModal";
 import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
+import { TimerModal } from "./TimerModal";
+import { TimerRail, dispatchOpenTimer } from "./TimerRail";
+import { createTimerStore } from "../lib/timer-store";
+import { flashElement, playFinishBell } from "../lib/timer-effects";
 import {
   closeTerminal,
   debugInsertFakeRegistryEntry,
@@ -137,6 +141,17 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     t.sessionId ?? sessionIdByLocalTab()[t.id];
 
   let stackEl!: HTMLDivElement;
+  // Flash overlay used to signal a timer-finish event. Lives inside
+  // .bw-stack so the flash is constrained to the workspace area (not the
+  // window chrome). Wired up below in onMount via timerStore.onFinish.
+  let flashEl: HTMLDivElement | undefined;
+
+  // Per-project focus timer. State is keyed by project path so each ring
+  // has its own countdown; the rail at top-right shows the ACTIVE
+  // project's countdown. Modal is opened by a window-level CustomEvent
+  // dispatched from the rail's click handler.
+  const timerStore = createTimerStore();
+  onCleanup(() => timerStore.dispose());
   // TerminalPane handles keyed by tab.id. Used to force-fit xterm after a
   // mode change — WebKit doesn't always fire ResizeObserver on the CSS
   // class swaps that 2D ↔ 3D triggers, so we drive a manual fit from
@@ -673,6 +688,21 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     };
     window.addEventListener("keydown", onWorkspaceKey);
 
+    // Timer finish: subtle bell + a brief radial flash tinted with the
+    // finished-project's accent so the user can tell at a glance which
+    // ring's session just ended.
+    const unsubFinish = timerStore.onFinish((projectPath) => {
+      const proj = projects().find((p) => p.path === projectPath) ?? null;
+      const accent =
+        proj && isColorTag(proj.color) ? PALETTE[proj.color].accent : "#5eead4";
+      if (flashEl) {
+        flashEl.style.setProperty("--flash-accent", accent);
+        flashElement(flashEl, "is-flashing", 1500);
+      }
+      playFinishBell();
+    });
+    onCleanup(unsubFinish);
+
     onCleanup(() => {
       unlistens.forEach((u) => u());
       ro.disconnect();
@@ -832,6 +862,22 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
               >
                 {proj().name}
               </div>
+            )}
+          </Show>
+
+          {/* Right-edge focus timer. Mirrors the project chip on the left
+              edge: stays visible in 3D mode while the header is auto-
+              hidden, dispatches a window-level CustomEvent on click which
+              the TimerModal listens for. Per-project state lives in
+              timerStore; the rail reads the active project's snapshot. */}
+          <Show when={activeProject()}>
+            {(proj) => (
+              <TimerRail
+                project={() => proj()}
+                store={timerStore}
+                accent={() => chipAccent() || null}
+                onOpen={() => dispatchOpenTimer(proj().path)}
+              />
             )}
           </Show>
 
@@ -1009,6 +1055,19 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
             {(proj) => <NotesModal projectId={proj().id} />}
           </Show>
 
+          {/* Focus timer modal scoped to the active project. Same scoping
+              rationale as NotesModal above: each open window's modal
+              targets that window's currently-active ring. */}
+          <Show when={activeProject()}>
+            {(proj) => (
+              <TimerModal
+                project={() => proj()}
+                store={timerStore}
+                accent={() => chipAccent() || null}
+              />
+            )}
+          </Show>
+
           {/* Terminal panes. Always all rendered, with display managed by
               the per-tab style block below so xterm instances don't get
               torn down when switching tabs. The 3D mode wraps each
@@ -1023,6 +1082,10 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                 : undefined
             }
           >
+            {/* Timer-finish flash overlay. Lives inside .bw-stack so the
+                radial fade is bounded by the cylinder area, not the whole
+                window. Pointer-events:none in CSS — clicks pass through. */}
+            <div class="bw-timer-flash" ref={flashEl} aria-hidden="true" />
             <div
               class={`bw-rings ${mode() === "3d" ? "is-3d" : ""}`}
               style={

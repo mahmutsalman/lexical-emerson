@@ -1,0 +1,343 @@
+/* Focus timer — stationary right-side rail in 3D mode + modal popup for
+   interaction. Pairs with src/components/TimerRail.tsx and
+   src/components/TimerModal.tsx. The rail mirrors the auto-hidden 3D
+   header in spirit: it sits above the cylinder, doesn't get
+   perspective-transformed, and stays glanceable while you work in a
+   terminal. */
+
+/* --- Rail --------------------------------------------------------------- */
+
+.timer-rail {
+  /* Hidden in 2D mode; mounted only on the bucket workspace anyway. The
+     parent .bucket-workspace.mode-3d rule below makes it visible. */
+  display: none;
+}
+
+.bucket-workspace.mode-3d .timer-rail {
+  display: inline-flex;
+  position: absolute;
+  /* Sits opposite the project chip (top-left). The auto-hidden header
+     overlays this whole strip when revealed; that's fine — the rail is
+     just a button and the header's z-index (10) wins. */
+  top: 8px;
+  right: 12px;
+  z-index: 12;
+
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+
+  appearance: none;
+  background: rgba(14, 14, 16, 0.92);
+  color: #f0f0f4;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* The accent is set inline from BucketWorkspace and tints the right edge
+     of the rail — same idiom as the project chip's left border. Both rails
+     read as peers anchored to opposite edges. */
+  border-right: 3px solid var(--timer-accent, rgba(255, 255, 255, 0.4));
+  border-radius: 4px;
+  padding: 4px 10px 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.bucket-workspace.mode-3d .timer-rail:hover {
+  background: rgba(20, 20, 24, 0.96);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.timer-rail-label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.timer-rail-time {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #f4f4f6;
+}
+
+.timer-rail-hint {
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.05em;
+}
+
+.timer-rail.is-running .timer-rail-time {
+  color: var(--timer-accent, #5eead4);
+}
+
+.timer-rail.is-paused .timer-rail-time {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.timer-rail.is-finished {
+  border-right-color: #fbbf24;
+  animation: timer-rail-throb 1.2s ease-in-out infinite;
+}
+
+.timer-rail.is-finished .timer-rail-time {
+  color: #fbbf24;
+}
+
+@keyframes timer-rail-throb {
+  0%, 100% { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }
+  50% { box-shadow: 0 4px 24px rgba(251, 191, 36, 0.45); }
+}
+
+/* Fade the rail out while the 3D header is being revealed, mirroring the
+   project chip's behaviour. Without this the Re-scan / Debug buttons on
+   the right side of the header collide with the rail. */
+.bucket-workspace.mode-3d .bw-header-trigger:hover ~ .timer-rail,
+.bucket-workspace.mode-3d .bw-header:hover ~ .timer-rail {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+/* --- Modal -------------------------------------------------------------- */
+
+.timer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.timer-modal {
+  width: 380px;
+  max-width: 92vw;
+  background: #15161b;
+  color: #ececef;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 3px solid var(--timer-accent, #5eead4);
+  border-radius: 8px;
+  padding: 16px 18px 14px;
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.timer-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.timer-modal-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.timer-modal-close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.timer-modal-close:hover {
+  color: #ffffff;
+}
+
+.timer-modal-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0 4px;
+}
+
+.timer-modal-time {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 56px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: #f4f4f6;
+}
+
+.timer-modal-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.timer-modal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timer-modal-input {
+  flex: 1 1 auto;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 8px 10px;
+  color: #ffffff;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.timer-modal-input:focus {
+  border-color: var(--timer-accent, #5eead4);
+}
+
+.timer-modal-input-suffix {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.06em;
+}
+
+.timer-btn {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ececef;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.timer-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.timer-btn.primary {
+  background: var(--timer-accent, #5eead4);
+  border-color: var(--timer-accent, #5eead4);
+  color: #0e0e10;
+}
+
+.timer-btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+.timer-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.timer-modal-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.timer-preset {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.timer-preset:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.timer-modal-controls {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.timer-modal-hint {
+  margin-top: 4px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.timer-modal-hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  margin: 0 2px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+}
+
+.timer-modal-finish-note {
+  font-size: 11px;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.24);
+  border-radius: 4px;
+  padding: 6px 8px;
+  letter-spacing: 0.01em;
+}
+
+/* --- Finish flash overlay ---------------------------------------------- */
+
+.bw-timer-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+  opacity: 0;
+  background: radial-gradient(
+    closest-side,
+    var(--flash-accent, #5eead4),
+    transparent 70%
+  );
+  /* mix-blend-mode keeps the flash from washing out the terminal text —
+     the highlight rides on top of the existing colours instead of
+     replacing them. */
+  mix-blend-mode: screen;
+}
+
+.bw-timer-flash.is-flashing {
+  animation: bw-timer-flash-pulse 1.5s ease-out;
+}
+
+@keyframes bw-timer-flash-pulse {
+  0% { opacity: 0; }
+  8% { opacity: 0.45; }
+  22% { opacity: 0.12; }
+  38% { opacity: 0.38; }
+  56% { opacity: 0.08; }
+  100% { opacity: 0; }
+}
