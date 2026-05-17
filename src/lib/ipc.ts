@@ -12,6 +12,8 @@ import type {
   PtyDataEvent,
   PtyExitEvent,
   PtyTerminalInfo,
+  TranscriptPeek,
+  TranscriptResponse,
 } from "./types";
 
 export async function pickFolder(): Promise<string | null> {
@@ -335,6 +337,34 @@ export async function detectClaudeSessionsForCwd(
   cwd: string,
 ): Promise<string[]> {
   return await invoke<string[]>("detect_claude_sessions_for_cwd", { cwd });
+}
+
+// D2 — preview card data for SuspendedPlaceholder. Reads only the tail of
+// the JSONL (~64 KB), so safe to call repeatedly even on the 40 MB outlier
+// in the user's session collection. Fields can be null when the tail
+// contains no assistant message or no timestamped line.
+export async function peekSessionTranscript(
+  cwd: string,
+  sessionId: string,
+): Promise<TranscriptPeek> {
+  return await invoke<TranscriptPeek>("peek_session_transcript", {
+    cwd,
+    sessionId,
+  });
+}
+
+// D2 — full transcript for TranscriptModal. Capped at the last 5 MB of the
+// file (response.truncated = true when the cap fired); the modal surfaces
+// the truncation so the user knows they're seeing the tail. lines[] are
+// parsed JSON values typed as the TranscriptLine union for the renderer.
+export async function readSessionTranscript(
+  cwd: string,
+  sessionId: string,
+): Promise<TranscriptResponse> {
+  return await invoke<TranscriptResponse>("read_session_transcript", {
+    cwd,
+    sessionId,
+  });
 }
 
 // --- notes -----------------------------------------------------------------

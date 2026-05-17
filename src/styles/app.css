@@ -308,60 +308,164 @@
   line-height: 1;
 }
 
-/* The placeholder that mounts inside .terminal-host in place of the
-   TerminalPane when a tab is suspended. Fills the host like the xterm
-   used to, click anywhere → resume. Self-focuses on mount (focus ring is
-   suppressed so it doesn't look like a form element). */
+/* The composite placeholder that fills .terminal-host when a tab is
+   suspended (D1 + D2). Three stacked sections:
+     1. status row — glyph + "Suspended (idle)" + last-activity time
+     2. preview card — last assistant message snippet (peek result)
+     3. action row — [Read transcript] [Resume session]
+   Plus a faint session-id badge at the bottom for diagnostic use. The
+   whole surface is dark like xterm so the visual shift on suspend is
+   minimal — just a chrome change, not a different "app". */
 .terminal-suspended {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
+  align-items: stretch;
+  gap: 16px;
   width: 100%;
   height: 100%;
   margin: 0;
-  padding: 24px;
+  padding: 32px clamp(24px, 8%, 64px) 28px;
   background: #0e0e10;
   color: #c0c0c8;
   border: none;
   outline: none;
-  cursor: pointer;
-  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 12px;
-  transition: background 140ms ease, color 140ms ease;
+  overflow-y: auto;
+  /* Push action row to the bottom even if preview is short — keeps the
+     buttons in a predictable spot regardless of session size. */
+  justify-content: space-between;
 }
 
-.terminal-suspended:hover,
-.terminal-suspended:focus-visible {
-  background: #15151a;
-  color: #ffffff;
+.terminal-suspended-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
 .terminal-suspended-glyph {
-  font-size: 42px;
+  font-size: 32px;
   line-height: 1;
-  color: var(--proj-border, #6b6b78);
-  opacity: 0.7;
+  color: var(--proj-border, #7c7c88);
+  opacity: 0.9;
 }
 
-.terminal-suspended:hover .terminal-suspended-glyph,
-.terminal-suspended:focus-visible .terminal-suspended-glyph {
-  opacity: 1;
+.terminal-suspended-status-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .terminal-suspended-title {
   font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   color: #d8d8e0;
 }
 
-.terminal-suspended-subtitle {
+.terminal-suspended-since {
   font-size: 11px;
   color: #7a7a85;
   font-family: "SF Mono", Menlo, Monaco, monospace;
+}
+
+/* Preview card — shows the last assistant message (truncated by Rust to
+   ~220 chars). The "last message" label and the message body stack
+   vertically inside a subtle bordered surface so the eye knows it's a
+   quoted snippet vs commentary. */
+.terminal-suspended-preview {
+  background: #15151a;
+  border: 1px solid #232328;
+  border-left: 2px solid var(--proj-border, #3b3b44);
+  border-radius: 6px;
+  padding: 12px 14px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.terminal-suspended-preview.is-empty,
+.terminal-suspended-preview.is-loading {
+  color: #6b6b75;
+  font-style: italic;
+  text-align: center;
+  border-left-color: #232328;
+}
+
+.terminal-suspended-preview-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #6b6b75;
+  margin-bottom: 6px;
+}
+
+.terminal-suspended-preview-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #d4d4dc;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.terminal-suspended-preview-ellipsis {
+  color: #6b6b75;
+}
+
+.terminal-suspended-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.terminal-suspended-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border: 1px solid #2a2a32;
+  border-radius: 6px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
   letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.terminal-suspended-btn.is-secondary {
+  background: #15151a;
+  color: #c0c0c8;
+}
+
+.terminal-suspended-btn.is-secondary:hover {
+  background: #1d1d22;
+  color: #ffffff;
+  border-color: #3a3a44;
+}
+
+.terminal-suspended-btn.is-primary {
+  background: var(--proj-border, #2563eb);
+  color: #ffffff;
+  border-color: transparent;
+}
+
+.terminal-suspended-btn.is-primary:hover {
+  opacity: 0.88;
+}
+
+.terminal-suspended-btn:focus-visible {
+  outline: 2px solid var(--proj-border, #6ea8ff);
+  outline-offset: 2px;
+}
+
+.terminal-suspended-session-id {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 10px;
+  color: #4a4a52;
+  text-align: right;
+  letter-spacing: 0.04em;
 }
 
 .terminals-view.is-3d .terminal-tabs {

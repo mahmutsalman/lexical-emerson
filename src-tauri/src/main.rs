@@ -104,6 +104,8 @@ fn main() {
             commands::list_persisted_project_ids,
             commands::load_active_claude_sessions_for_bucket,
             commands::detect_claude_sessions_for_cwd,
+            commands::peek_session_transcript,
+            commands::read_session_transcript,
         ])
         .setup(|app| {
             let app_data = app

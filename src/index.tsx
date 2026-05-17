@@ -7,6 +7,7 @@ import "./styles/notes.css";
 import "./styles/bucket-workspace.css";
 import "./styles/project-notes-rail.css";
 import "./styles/timer.css";
+import "./styles/transcript.css";
 import "@xterm/xterm/css/xterm.css";
 
 import { App } from "./App";

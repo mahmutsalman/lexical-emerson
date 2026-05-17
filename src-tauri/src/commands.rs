@@ -997,6 +997,26 @@ pub fn detect_claude_sessions_for_cwd(cwd: String) -> Vec<String> {
     session_restore::detect_active_claude_sessions(&cwd)
 }
 
+// D2 — SuspendedPlaceholder's preview card. Reads only the tail of the
+// JSONL (~64 KB) so even a 40 MB session resolves in a few ms.
+#[tauri::command(rename_all = "camelCase")]
+pub fn peek_session_transcript(
+    cwd: String,
+    session_id: String,
+) -> Result<session_restore::TranscriptPeek, String> {
+    session_restore::peek_session_transcript(&cwd, &session_id)
+}
+
+// D2 — TranscriptModal's full reader. Returns the parsed JSONL lines as
+// serde_json::Value, capped at the last 5 MB for very large sessions.
+#[tauri::command(rename_all = "camelCase")]
+pub fn read_session_transcript(
+    cwd: String,
+    session_id: String,
+) -> Result<session_restore::TranscriptResponse, String> {
+    session_restore::read_session_transcript(&cwd, &session_id)
+}
+
 // Right-click → "Load active Claude sessions" action on a bucket row.
 // Source of truth is the filesystem state of `~/.claude/projects/`, NOT
 // the persisted_terminals snapshot — that lets us pick up sessions that

@@ -2,6 +2,7 @@ import {
   Component,
   createEffect,
   createMemo,
+  createResource,
   createSignal,
   For,
   onCleanup,
@@ -15,6 +16,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
+import { TranscriptModal } from "./TranscriptModal";
 import {
   bytesToBase64,
   detectClaudeSessionsForCwd,
@@ -22,6 +24,7 @@ import {
   markActive,
   onMenuEvent,
   onRescanRequest,
+  peekSessionTranscript,
   persistProjectTerminals,
   registerTerminal,
   unregisterTerminal,
@@ -791,36 +794,137 @@ function basename(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-// Rendered in place of TerminalPane when a tab is suspended. Clicking
-// anywhere on the placeholder calls resumeTab, which mounts a fresh
-// TerminalPane in this slot — that pane spawns a new PTY and gets
-// `claude --resume <uuid>` injected via postSpawnByTab. The placeholder
-// also self-focuses on mount so the user can Enter / Space to resume
-// via keyboard once their attention is here.
+// Format an ISO timestamp as a short relative-time string ("12m ago",
+// "3h ago", "2d ago"). Used for the "last activity" line in the placeholder
+// header. Returns "" for null / unparseable input so the caller can
+// conditionally render the field.
+function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const ms = Date.now() - d.getTime();
+  if (ms < 60_000) return "just now";
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  return `${days}d ago`;
+}
+
+// Rendered in place of TerminalPane when a tab is suspended (D1 +
+// D2 composite). Three layers stacked vertically:
+//
+//   1. Status row: ◌ glyph + "Suspended (idle)" + last-activity timestamp
+//   2. Preview card: first ~220 chars of the most recent assistant text
+//      (fetched once via peekSessionTranscript). Gives context so the user
+//      remembers what this session was about before deciding.
+//   3. Action row: "Read transcript" (opens TranscriptModal) and
+//      "Resume session" (existing resumeTab path), side-by-side.
+//
+// The Resume button is auto-focused on mount so Enter / Space still
+// resumes the way D1 did, even now that there are two buttons. Tab
+// moves to Read transcript.
 const SuspendedPlaceholder: Component<{
   cwd: string;
   info: SuspendedInfo;
   onResume: () => void;
 }> = (props) => {
-  let btnEl!: HTMLButtonElement;
+  const [peek] = createResource(
+    () => ({ cwd: props.cwd, sessionId: props.info.claudeSessionId }),
+    async (k) => {
+      try {
+        return await peekSessionTranscript(k.cwd, k.sessionId);
+      } catch (err) {
+        console.warn("[suspended] peek failed:", err);
+        return null;
+      }
+    },
+  );
+  const [modalOpen, setModalOpen] = createSignal(false);
+
+  let resumeBtnEl!: HTMLButtonElement;
   onMount(() => {
-    // Single-frame defer so we don't fight with the focus-routing rules
-    // in App / TerminalsView during the suspended→placeholder transition.
-    queueMicrotask(() => btnEl?.focus());
+    // Single-frame defer keeps us out of fight-club with the parent
+    // window's focus rules during the suspended→placeholder transition.
+    // Focus the PRIMARY action so Enter still resumes (matching D1 UX);
+    // Tab moves to "Read transcript" for the deliberate-read path.
+    queueMicrotask(() => resumeBtnEl?.focus());
   });
+
   return (
-    <button
-      type="button"
-      class="terminal-suspended"
-      ref={btnEl}
-      onClick={() => props.onResume()}
-      title={`Resume claude --resume ${props.info.claudeSessionId}`}
-    >
-      <span class="terminal-suspended-glyph" aria-hidden="true">◌</span>
-      <span class="terminal-suspended-title">Suspended (idle)</span>
-      <span class="terminal-suspended-subtitle">
-        Click or press Enter to resume — claude --resume {props.info.claudeSessionId.slice(0, 8)}…
-      </span>
-    </button>
+    <>
+      <div class="terminal-suspended">
+        <div class="terminal-suspended-status">
+          <span class="terminal-suspended-glyph" aria-hidden="true">◌</span>
+          <div class="terminal-suspended-status-text">
+            <div class="terminal-suspended-title">Suspended (idle)</div>
+            <Show when={peek()?.last_at}>
+              <div class="terminal-suspended-since">
+                last activity {formatRelative(peek()?.last_at)}
+              </div>
+            </Show>
+          </div>
+        </div>
+
+        <Show
+          when={peek() && peek()!.last_assistant_preview}
+          fallback={
+            <Show
+              when={peek.loading}
+              fallback={
+                <div class="terminal-suspended-preview is-empty">
+                  No assistant reply in this session yet.
+                </div>
+              }
+            >
+              <div class="terminal-suspended-preview is-loading">
+                Loading preview…
+              </div>
+            </Show>
+          }
+        >
+          <div class="terminal-suspended-preview">
+            <div class="terminal-suspended-preview-label">last message</div>
+            <p class="terminal-suspended-preview-body">
+              {peek()!.last_assistant_preview}
+              <span class="terminal-suspended-preview-ellipsis">…</span>
+            </p>
+          </div>
+        </Show>
+
+        <div class="terminal-suspended-actions">
+          <button
+            type="button"
+            class="terminal-suspended-btn is-secondary"
+            onClick={() => setModalOpen(true)}
+            title="Open the full transcript (read-only)"
+          >
+            <span aria-hidden="true">📖</span> Read transcript
+          </button>
+          <button
+            type="button"
+            class="terminal-suspended-btn is-primary"
+            ref={resumeBtnEl}
+            onClick={() => props.onResume()}
+            title={`claude --resume ${props.info.claudeSessionId}`}
+          >
+            <span aria-hidden="true">▶</span> Resume session
+          </button>
+        </div>
+
+        <div class="terminal-suspended-session-id">
+          {props.info.claudeSessionId.slice(0, 8)}…
+        </div>
+      </div>
+
+      <TranscriptModal
+        open={modalOpen}
+        cwd={props.cwd}
+        sessionId={props.info.claudeSessionId}
+        onClose={() => setModalOpen(false)}
+        onResume={() => props.onResume()}
+      />
+    </>
   );
 };
