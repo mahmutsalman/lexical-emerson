@@ -560,6 +560,15 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
           [props.projectPath]: !prev[props.projectPath],
         }));
       }),
+      // D1+D2 manual trigger. Same suspendTab path the 20-min idle timer
+      // calls — no special branch. Silent no-op when the active tab has no
+      // detectable Claude session in its cwd (the suspend rule requires a
+      // resumable UUID); console.info from suspendTab explains why.
+      onMenuEvent("terminal-suspend", () => {
+        const id = activeId();
+        if (!id) return;
+        void suspendTab(id);
+      }),
       // When the workspace asks every window to re-register their PTYs,
       // walk our own session map and re-call registerTerminal. Catches
       // terminals that were spawned before the registry shipped, or that

@@ -426,6 +426,7 @@ export type MenuEventId =
   | "terminal-next"
   | "terminal-prev"
   | "terminal-toggle-3d"
+  | "terminal-suspend"
   | "quick-switcher"
   | "bucket-next"
   | "bucket-prev"

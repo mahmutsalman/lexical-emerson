@@ -162,6 +162,7 @@ fn main() {
                 "terminal_next" => "menu://terminal-next",
                 "terminal_prev" => "menu://terminal-prev",
                 "terminal_3d" => "menu://terminal-toggle-3d",
+                "terminal_suspend" => "menu://terminal-suspend",
                 // The arrow shortcuts share the cycle events with ⌘⇧K / ⌘K
                 // so typing always follows the visible centred terminal.
                 "terminal_rotate_left" => "menu://terminal-prev",
@@ -358,6 +359,12 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let terminal_3d = MenuItemBuilder::with_id("terminal_3d", "Toggle 3D Arc View")
         .accelerator("CmdOrCtrl+Alt+3")
         .build(app)?;
+    // D1+D2 — manual trigger for the auto-suspend path. Same flow the 20-min
+    // idle timer uses; lets the user free RAM the instant they know they're
+    // done with a tab, and acts as the test affordance for D2's placeholder.
+    let terminal_suspend = MenuItemBuilder::with_id("terminal_suspend", "Suspend Session")
+        .accelerator("CmdOrCtrl+Alt+S")
+        .build(app)?;
     let terminal_rotate_left =
         MenuItemBuilder::with_id("terminal_rotate_left", "Previous Terminal (Arrow)")
             .accelerator("CmdOrCtrl+Alt+Left")
@@ -378,6 +385,7 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let terminal_submenu = SubmenuBuilder::new(app, "Terminal")
         .item(&terminal_new)
         .item(&terminal_close)
+        .item(&terminal_suspend)
         .separator()
         .item(&terminal_next)
         .item(&terminal_prev)
