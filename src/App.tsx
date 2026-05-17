@@ -9,10 +9,7 @@ import {
   Show,
 } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  getCurrentWebviewWindow,
-  WebviewWindow,
-} from "@tauri-apps/api/webviewWindow";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { BucketBar } from "./components/BucketBar";
@@ -27,6 +24,7 @@ import { TerminalsView } from "./components/TerminalsView";
 import {
   currentWindowLabel,
   cycleBucket,
+  emitMenuEventLocal,
   getActiveBucket,
   getProjectById,
   listBuckets,
@@ -308,7 +306,7 @@ export const App: Component = () => {
             title="Open notes (⌘⇧N)"
             aria-label="Open notes"
             onClick={() => {
-              void getCurrentWebviewWindow().emit("menu://notes-open");
+              void emitMenuEventLocal("notes-open");
             }}
           >
             <svg

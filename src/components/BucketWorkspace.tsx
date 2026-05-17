@@ -11,7 +11,6 @@ import {
   Show,
 } from "solid-js";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   closestCenter,
   DragDropProvider,
@@ -35,12 +34,14 @@ declare module "solid-js" {
   }
 }
 
+import { BucketWorkspaceDebugLog } from "./BucketWorkspaceDebugLog";
 import { NotesModal } from "./NotesModal";
 import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
 import {
   closeTerminal,
   debugInsertFakeRegistryEntry,
+  emitMenuEventLocal,
   listAllRegisteredTerminals,
   listBuckets,
   listTerminalsForBucket,
@@ -125,6 +126,10 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
   // the debug strip below the header.
   const [registryEntries, setRegistryEntries] = createSignal<PtyTerminalInfo[]>([]);
   const [showDebug, setShowDebug] = createSignal(false);
+  // Toggleable click/key/wheel event-capture log. Off by default; ⌘⌥D
+  // flips it. Diagnostic for the notes-pane click bug and any future
+  // event-routing issues inside the 3D-transformed subtree.
+  const [showEventLog, setShowEventLog] = createSignal(false);
 
   // Lookup effective sessionId for a tab: attached tabs carry it on the
   // Tab object; owned tabs learn it via the sidecar map.
@@ -142,6 +147,16 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
 
   const activeProject = (): Project | null =>
     projects()[activeProjectIdx()] ?? null;
+
+  // Accent color for the always-visible project chip, derived from the
+  // active project's PALETTE entry. As a separate memo so the chip's
+  // inline-style update flows from activeProject() reactivity AND the
+  // `isColorTag` type guard works without an `as` cast.
+  const chipAccent = createMemo<string>(() => {
+    const p = activeProject();
+    if (!p) return "";
+    return isColorTag(p.color) ? PALETTE[p.color].accent : "";
+  });
 
   const tabsForProject = (path: string) =>
     tabs().filter((t) => t.projectPath === path);
@@ -498,6 +513,37 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     );
   });
 
+  // Enter-to-focus model (replaces an earlier auto-focus effect):
+  // ⌘⌥→ / ⌘⌥↓ rotate the cylinder visually but do NOT move focus.
+  // The user presses Enter to "step into" the facing pane, and Esc
+  // to "step out". This decouples cylinder rotation from focus, so
+  // clicks on the notes pane don't race with an auto-focus on a
+  // (possibly WebGL-lost) terminal canvas. Keydown listener is wired
+  // in the onMount below alongside the wheel handler and ⌘⌥D toggle.
+  //
+  // Blur-on-navigate: navigation in 3D reactively drops xterm focus
+  // so subsequent keystrokes don't leak into the previously-focused
+  // terminal. Without this, the user navigates from a focused
+  // terminal A to the notes face, presses Enter (intending only to
+  // open the notes modal), and Enter ALSO writes a newline into
+  // terminal A's shell because xterm-A still owned focus. We take
+  // focus AWAY here; the explicit Enter handler takes focus INTO
+  // the new pane. 2D mode is click-driven and naturally moves
+  // focus on tab switch, so we skip it.
+  createEffect(() => {
+    if (mode() !== "3d") return;
+    activeTabId();
+    activeProjectIdx();
+
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active.closest(".bw-pane .xterm") !== null
+    ) {
+      active.blur();
+    }
+  });
+
   // Also fit any newly-ready pane against the current layout — without
   // this, a tab added DURING 3D mode mounts xterm against the pre-fit-now
   // class-application interval (`display:none → flex`) and stays at 0×0
@@ -550,9 +596,89 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
     });
     if (stackEl) ro.observe(stackEl);
 
+    // Route wheel events to the facing terminal's xterm scrollback. In 3D
+    // mode, .bw-pane.is-3d sets pointer-events: none on non-facing panes
+    // (deliberate — keeps inactive rings' empty boxes from stealing clicks),
+    // which also blocks xterm's native wheel handler the moment the user
+    // ⌘⌥→ navigates to a different terminal. The active+facing pane gets
+    // pointer-events: auto but its xterm still doesn't reliably receive
+    // wheel through the perspective ancestor (the same class of issue
+    // ADR-0011 documents for DnD). Mirror TerminalsView's fix: intercept
+    // wheel at the stack and drive scrollLines manually on the active
+    // terminal's handle.
+    const onWheel = (e: WheelEvent) => {
+      if (mode() !== "3d") return;
+      if (e.deltaY === 0) return;
+      const id = activeTabId();
+      if (!id) return;
+      const handle = handles.get(id);
+      if (!handle) return;
+      const sign = e.deltaY > 0 ? 1 : -1;
+      const magnitude = Math.max(1, Math.round(Math.abs(e.deltaY) / 18));
+      handle.scrollLines(sign * magnitude);
+      e.preventDefault();
+    };
+    if (stackEl) stackEl.addEventListener("wheel", onWheel, { passive: false });
+
+    // ⌘⌥D toggles the event-capture overlay. Not wired through Tauri's
+    // menu since this is a developer-debug surface — keeping it as a
+    // direct window listener avoids polluting the native menu config.
+    const onDebugToggle = (e: KeyboardEvent) => {
+      if (e.metaKey && e.altKey && (e.key === "d" || e.key === "D" || e.code === "KeyD")) {
+        e.preventDefault();
+        setShowEventLog((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onDebugToggle);
+
+    // Enter-to-focus model: Enter steps INTO the facing pane (focuses
+    // its xterm, or opens the notes modal if the notes face is
+    // facing). Escape steps OUT (blurs the focused xterm so ⌘⌥
+    // shortcuts respond cleanly). Only active in 3D mode — 2D is
+    // click-driven and doesn't need the gesture.
+    //
+    // We never intercept Enter while xterm IS the active element —
+    // that would break the shell prompt. The closest() check confirms
+    // the active element lives inside the facing pane's .xterm host.
+    const onWorkspaceKey = (e: KeyboardEvent) => {
+      if (mode() !== "3d") return;
+      if (e.metaKey || e.altKey || e.ctrlKey) return;
+
+      const active = document.activeElement;
+      const xtermFocused =
+        active instanceof HTMLElement &&
+        active.closest(".bw-pane.is-3d.is-facing .xterm") !== null;
+
+      if (e.key === "Enter" && !xtermFocused) {
+        const p = activeProject();
+        const sel = p ? activeByProject()[p.path] : null;
+        if (sel === NOTES_SENTINEL) {
+          e.preventDefault();
+          void emitMenuEventLocal("notes-open");
+          return;
+        }
+        const id = activeTabId();
+        if (id) {
+          e.preventDefault();
+          handles.get(id)?.focus();
+        }
+        return;
+      }
+
+      if (e.key === "Escape" && xtermFocused) {
+        e.preventDefault();
+        (active as HTMLElement).blur();
+        return;
+      }
+    };
+    window.addEventListener("keydown", onWorkspaceKey);
+
     onCleanup(() => {
       unlistens.forEach((u) => u());
       ro.disconnect();
+      if (stackEl) stackEl.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onDebugToggle);
+      window.removeEventListener("keydown", onWorkspaceKey);
     });
   });
 
@@ -630,6 +756,10 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
               works without JS. Hidden in 2D mode (CSS gates on the
               parent's mode-3d class). */}
           <div class="bw-header-trigger" aria-hidden="true" />
+          <BucketWorkspaceDebugLog
+            visible={showEventLog}
+            onClose={() => setShowEventLog(false)}
+          />
           <header class="bw-header">
             <span class="bw-title">{b().name}</span>
             <span
@@ -641,7 +771,7 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
             </span>
             <span class="bw-hint">
               {mode() === "3d"
-                ? "⌘⌥3 exit · ⌘⌥↑/↓ ring · ⌘⌥←/→ terminal"
+                ? "⌘⌥3 exit · ⌘⌥↑/↓ ring · ⌘⌥←/→ terminal · Enter focus · Esc blur"
                 : `${tabs().length} tab${tabs().length === 1 ? "" : "s"} · registry ${registryTotal()}`}
             </span>
             <button
@@ -672,6 +802,38 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
               {showDebug() ? "Hide debug" : "Debug"}
             </button>
           </header>
+
+          {/* Always-visible active-project chip. The .bw-header auto-hides
+              in 3D mode, so without this the user has no persistent
+              indicator of which project the active ring belongs to. The
+              chip uses the same per-project accent (--chip-accent) that
+              tints the active pane's frame, so it reads as a peer of the
+              ring it labels. Hidden in 2D via CSS — the static header is
+              always visible there.
+
+              Rendered AFTER .bw-header so the CSS sibling combinator
+              `.bw-header:hover ~ .bw-project-chip` can fade the chip
+              out while the header is hover-revealed — otherwise the
+              chip would overlap with the bucket title on the left. */}
+          <Show when={activeProject()}>
+            {(proj) => (
+              // proj() is accessed inline (no snapshot to a local) so
+              // Solid's reactivity flows through and the chip updates
+              // when activeProjectIdx switches the active project. The
+              // earlier `const p = proj()` pattern only ran once because
+              // Solid's non-keyed <Show> doesn't re-invoke its render
+              // prop on truthy → different-truthy transitions.
+              <div
+                class="bw-project-chip"
+                style={
+                  { "--chip-accent": chipAccent() } as Record<string, string>
+                }
+                title={proj().path}
+              >
+                {proj().name}
+              </div>
+            )}
+          </Show>
 
           <Show when={showDebug()}>
             <div class="bw-debug">
@@ -939,23 +1101,33 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
                           >
                             <ProjectNotesPanel
                               projectId={() => p.id}
-                              onOpenEditor={() => {
+                              onOpenEditor={(noteId) => {
                                 // NotesModal is scoped to activeProject(),
                                 // so make sure THIS ring's project is the
                                 // active one before opening — otherwise
                                 // the modal would open against whatever
                                 // project was last focused.
                                 setActiveProjectIdx(pi());
-                                // Emit on the current webview window with
-                                // the dotted-prefix name the modal's
-                                // listener (onMenuEvent -> menu://<id>)
-                                // actually subscribes to. The previous
-                                // `emit("menu-event", "notes-open")` was
-                                // a global broadcast of the wrong event
-                                // name, so the modal never saw it.
-                                void getCurrentWebviewWindow().emit(
-                                  "menu://notes-open",
-                                );
+                                // If the caller picked a specific note,
+                                // hint the modal synchronously BEFORE the
+                                // Tauri emit so its open-handler picks up
+                                // that id instead of defaulting to the
+                                // most-recently-updated note.
+                                if (noteId != null) {
+                                  window.dispatchEvent(
+                                    new CustomEvent(
+                                      "lexical:notes-open-hint",
+                                      { detail: { noteId } },
+                                    ),
+                                  );
+                                }
+                                // emitMenuEventLocal scopes the event
+                                // target to THIS webview window
+                                // (emitTo(label, ...)), so other open
+                                // windows' NotesModals don't also pop
+                                // open. Plain `emit()` was a broadcast
+                                // and was firing every window's modal.
+                                void emitMenuEventLocal("notes-open");
                               }}
                             />
                           </div>

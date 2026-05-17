@@ -19,7 +19,7 @@ import type { Note, NoteSummary } from "../lib/types";
 
 interface ProjectNotesPanelProps {
   projectId: Accessor<number | null>;
-  onOpenEditor: () => void;
+  onOpenEditor: (noteId?: number) => void;
 }
 
 function displayTitle(n: NoteSummary): string {
@@ -114,22 +114,26 @@ export const ProjectNotesPanel: Component<ProjectNotesPanelProps> = (props) => {
           Edit
         </button>
       </header>
-      <ul class="pnr-list">
+      <div class="pnr-list">
         <For
           each={notes() ?? []}
-          fallback={<li class="pnr-empty">No notes yet</li>}
+          fallback={<div class="pnr-empty">No notes yet</div>}
         >
           {(n) => (
-            <li
+            <button
+              type="button"
               class={`pnr-item ${n.id === selectedNoteId() ? "is-selected" : ""}`}
-              onClick={() => setSelectedNoteId(n.id)}
-              title={displayTitle(n)}
+              onClick={() => {
+                setSelectedNoteId(n.id);
+                props.onOpenEditor(n.id);
+              }}
+              title={`${displayTitle(n)} — click to open`}
             >
               {displayTitle(n)}
-            </li>
+            </button>
           )}
         </For>
-      </ul>
+      </div>
       <div class="pnr-preview" ref={previewEl} />
     </aside>
   );

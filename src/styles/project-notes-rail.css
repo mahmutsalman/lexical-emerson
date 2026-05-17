@@ -52,16 +52,31 @@
 }
 
 .pnr-list {
-  list-style: none;
   margin: 0;
   padding: 4px 0;
   flex: 0 0 38%;
   overflow-y: auto;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   scrollbar-width: thin;
+  /* Defensive: explicit pointer-events:auto so the rail is interactive
+     even inside the 3D-transformed .bw-pane.is-3d ancestor (which sets
+     pointer-events:none on .bw-pane.is-3d). The .is-notes override does
+     the same at the pane level, but we belt-and-brace it on the rail
+     too — hit-testing inside CSS-3D subtrees has bitten us before
+     (ADR-0011). */
+  pointer-events: auto;
 }
 
 .pnr-item {
+  /* Button reset — these items are <button> elements (changed from <li>
+     so clicks land reliably inside the 3D-transformed pane). */
+  appearance: none;
+  background: transparent;
+  border: none;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  display: block;
   padding: 6px 10px;
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -70,6 +85,7 @@
   text-overflow: ellipsis;
   color: #c4c4c8;
   transition: background 80ms ease, color 80ms ease;
+  pointer-events: auto;
 }
 
 .pnr-item:hover {

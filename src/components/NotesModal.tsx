@@ -92,6 +92,11 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
   // avoid Solid effects firing on every keystroke.
   let loadedNoteId: number | null = null;
   let saveTimer: number | undefined;
+  // Set by the synchronous `lexical:notes-open-hint` window event that
+  // BucketWorkspace dispatches right before emitting `menu://notes-open`
+  // when a user double-clicks a specific note in the 3D bucket view.
+  // Consumed (and cleared) by the notes-open handler below.
+  let pendingOpenNoteId: number | null = null;
   let titleSaveTimer: number | undefined;
   let editorSlot: HTMLDivElement | undefined;
   let textChangeHandler: ((delta: unknown, oldDelta: unknown, source: string) => void) | null = null;
@@ -448,7 +453,13 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
     }
   };
 
+  const onNotesOpenHint = (e: Event) => {
+    const detail = (e as CustomEvent<{ noteId?: number }>).detail;
+    if (detail?.noteId != null) pendingOpenNoteId = detail.noteId;
+  };
+
   onMount(async () => {
+    window.addEventListener("lexical:notes-open-hint", onNotesOpenHint);
     const unlisten = await onMenuEvent("notes-open", async () => {
       setNoteProjectContext(props.projectId);
       setOpen(true);
@@ -467,11 +478,21 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
         ctx.quill.root.addEventListener("paste", onPaste, { capture: true });
         ctx.quill.root.addEventListener("click", onEditorClick);
       }
-      // Auto-select the most recently updated note, if any. Otherwise leave
-      // the editor blank with a clear "press + to create" cue.
+      // Prefer the caller-supplied note id (e.g. double-click in the 3D
+      // bucket notes panel); fall back to the most recently updated note.
+      // Leave the editor blank with a clear "press + to create" cue if
+      // there are no notes at all.
       const list = notes() ?? (await listNotes(props.projectId));
-      if (list.length > 0) {
-        selectNote(list[0].id);
+      const hinted = pendingOpenNoteId;
+      pendingOpenNoteId = null;
+      const target =
+        hinted != null && list.some((n) => n.id === hinted)
+          ? hinted
+          : list.length > 0
+            ? list[0].id
+            : null;
+      if (target != null) {
+        selectNote(target);
       } else {
         loadedNoteId = null;
         ctx.quill.setContents({ ops: [] } as never, "silent");
@@ -483,6 +504,7 @@ export const NotesModal: Component<NotesModalProps> = (props) => {
   onCleanup(() => {
     window.clearTimeout(saveTimer);
     window.clearTimeout(titleSaveTimer);
+    window.removeEventListener("lexical:notes-open-hint", onNotesOpenHint);
     if (textChangeHandler) {
       // The Quill instance lives across modal lifetimes; only remove the
       // listener when the modal component itself is being torn down.

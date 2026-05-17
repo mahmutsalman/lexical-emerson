@@ -2,6 +2,7 @@ import { Component, createEffect, onCleanup, onMount } from "solid-js";
 import type { Accessor } from "solid-js";
 
 import { Terminal } from "@xterm/xterm";
+import { CanvasAddon } from "@xterm/addon-canvas";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -136,12 +137,35 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
 
     // WebGL renderer must be loaded AFTER open() — needs a live canvas. Falls
     // back to canvas if WebGL isn't available (e.g. missing entitlement).
+    //
+    // On context LOSS (the page exceeded WebKit's ~16 concurrent WebGL
+    // contexts cap — happens when the bucket workspace AND multiple
+    // per-project windows are open simultaneously, each running their
+    // own xterm instances) we dispose the dead addon AND load the
+    // CanvasAddon so the terminal keeps rendering. Canvas is slower but
+    // uses no WebGL context, so it survives the cap.
+    const termRef = term;
+    const loadCanvasFallback = () => {
+      try {
+        termRef.loadAddon(new CanvasAddon());
+      } catch (err) {
+        console.warn("TerminalPane: canvas fallback failed:", err);
+      }
+    };
     try {
       const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
+      webgl.onContextLoss(() => {
+        try {
+          webgl.dispose();
+        } catch {
+          // already disposed
+        }
+        loadCanvasFallback();
+      });
+      termRef.loadAddon(webgl);
     } catch (err) {
       console.warn("WebGL renderer unavailable; falling back to canvas:", err);
+      loadCanvasFallback();
     }
 
     fitAddon.fit();

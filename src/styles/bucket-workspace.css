@@ -91,6 +91,180 @@
   transform: translateY(0);
 }
 
+/* Always-visible active-project chip. Anchored to the top-LEFT of the
+   workspace so the user can read which project the active ring belongs
+   to even while the .bw-header is slid off-screen in 3D mode. The chip
+   tints its left border with --chip-accent (set inline from the
+   project's PALETTE entry) so it visually echoes the active pane's
+   frame. Hidden in 2D — the static .bw-header is always visible there
+   and the chip would be redundant chrome.
+
+   Placement note: chip was initially top-right but collided with the
+   Re-scan / Enter-3D / Debug buttons in .bw-header when the user
+   hovered to bring the header in. Moved to top-LEFT and faded out
+   while the header is visible (sibling-combinator below) so it never
+   competes with the bucket title or right-side controls. */
+.bw-project-chip {
+  display: none;
+}
+.bucket-workspace.mode-3d .bw-project-chip {
+  display: inline-flex;
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  /* Above .bw-header-trigger (z-index: 11) so the chip stays
+     visually on top. pointer-events:none means it still doesn't
+     intercept the hover-trigger strip. */
+  z-index: 12;
+  align-items: center;
+  padding: 4px 10px 4px 8px;
+  background: rgba(14, 14, 16, 0.92);
+  color: #f0f0f4;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 3px solid var(--chip-accent, rgba(255, 255, 255, 0.4));
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+/* Fade the chip out whenever the auto-hidden 3D header is being
+   revealed (either by hovering the top-edge trigger or hovering the
+   header itself). Mirrors the existing slide-in selectors at
+   .bw-header-trigger:hover ~ .bw-header above. Requires the chip to
+   be rendered AFTER .bw-header in the DOM (see BucketWorkspace.tsx
+   placement comment). */
+.bucket-workspace.mode-3d .bw-header-trigger:hover ~ .bw-project-chip,
+.bucket-workspace.mode-3d .bw-header:hover ~ .bw-project-chip {
+  opacity: 0;
+}
+
+/* Event-capture debug overlay (⌘⌥D). Sits below the project chip in
+   the top-right area. Captures pointer/click/key/wheel at document
+   level with capture:true; used to diagnose why clicks inside the
+   3D-transformed notes pane sometimes don't fire. */
+.bw-debug-log {
+  position: absolute;
+  top: 44px;
+  right: 12px;
+  width: 380px;
+  max-height: 50vh;
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 10, 12, 0.96);
+  color: #e2e2e6;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  /* The overlay must NOT block events to the workspace beneath it —
+     its whole purpose is to observe events that fire elsewhere. Each
+     button inside re-enables pointer-events. */
+  pointer-events: none;
+}
+
+.bw-debug-log-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  pointer-events: auto;
+}
+
+.bw-debug-log-title {
+  flex: 1;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.bw-debug-log-btn {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.bw-debug-log-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.bw-debug-log-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 0;
+  pointer-events: auto;
+}
+
+.bw-debug-log-empty {
+  padding: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  font-style: italic;
+}
+
+.bw-debug-log-row {
+  display: grid;
+  grid-template-columns: 84px 70px 1fr 90px;
+  gap: 6px;
+  padding: 2px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  align-items: center;
+}
+
+.bw-debug-log-ts {
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.bw-debug-log-type {
+  color: #ffd479;
+  font-weight: 600;
+}
+
+.bw-debug-log-row.type-click .bw-debug-log-type {
+  color: #6ee7b7;
+}
+
+.bw-debug-log-row.type-keydown .bw-debug-log-type {
+  color: #93b4f0;
+}
+
+.bw-debug-log-row.type-wheel .bw-debug-log-type {
+  color: #c4b5fd;
+}
+
+.bw-debug-log-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e2e2e6;
+}
+
+.bw-debug-log-detail {
+  color: rgba(255, 255, 255, 0.55);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .bw-title {
   font-size: 13px;
   font-weight: 600;

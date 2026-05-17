@@ -372,24 +372,26 @@ export async function resolveNoteImage(
 
 // --- menu events -----------------------------------------------------------
 
+export type MenuEventId =
+  | "terminal-new"
+  | "terminal-close"
+  | "terminal-next"
+  | "terminal-prev"
+  | "terminal-toggle-3d"
+  | "quick-switcher"
+  | "bucket-next"
+  | "bucket-prev"
+  | "bucket-new"
+  | "notes-open"
+  | "zoom-in"
+  | "zoom-out"
+  | "zoom-reset"
+  | "file-open-folder"
+  | "bucket-3d-ring-prev"
+  | "bucket-3d-ring-next";
+
 export async function onMenuEvent(
-  id:
-    | "terminal-new"
-    | "terminal-close"
-    | "terminal-next"
-    | "terminal-prev"
-    | "terminal-toggle-3d"
-    | "quick-switcher"
-    | "bucket-next"
-    | "bucket-prev"
-    | "bucket-new"
-    | "notes-open"
-    | "zoom-in"
-    | "zoom-out"
-    | "zoom-reset"
-    | "file-open-folder"
-    | "bucket-3d-ring-prev"
-    | "bucket-3d-ring-next",
+  id: MenuEventId,
   cb: () => void,
 ): Promise<UnlistenFn> {
   // Scope to the current webview window. The Rust side emits with
@@ -399,6 +401,39 @@ export async function onMenuEvent(
   // .listen() registers a target-scoped listener so only the focused window
   // reacts. See plan: "Active fix — M3: menu events still fire in every window".
   return await getCurrentWebviewWindow().listen<void>(`menu://${id}`, () => cb());
+}
+
+/**
+ * Emit a menu-event so only the CURRENT window receives it.
+ *
+ * `WebviewWindow.emit()` is a global broadcast in Tauri v2 — its target
+ * is `Any`, which bypasses the per-window filter that
+ * `WebviewWindow.listen()` applies. That meant clicking a note in one
+ * window's NotesPanel would also pop the notes modal in every other
+ * window that had a NotesModal mounted.
+ *
+ * `emitTo` with a TYPED target object is the right primitive. We pass
+ * the explicit `{ kind: "WebviewWindow", label }` shape because:
+ * - `emitTo(stringLabel, ...)` shorthand constructs
+ *   `{ kind: "AnyLabel", label }` — a different EventTarget kind.
+ * - `WebviewWindow.listen()` registers with
+ *   `{ kind: "WebviewWindow", label: this.label }`.
+ * - Tauri's runtime treats `AnyLabel` and `WebviewWindow` as DISTINCT
+ *   target kinds and won't deliver across them. So the string form
+ *   silently drops the event on the floor.
+ *
+ * Use the explicit object so the kinds match and the listener fires.
+ */
+export async function emitMenuEventLocal(
+  id: MenuEventId,
+  payload?: unknown,
+): Promise<void> {
+  const w = getCurrentWebviewWindow();
+  await w.emitTo(
+    { kind: "WebviewWindow", label: w.label },
+    `menu://${id}`,
+    payload,
+  );
 }
 
 // --- base64 helpers --------------------------------------------------------
