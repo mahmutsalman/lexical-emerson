@@ -22,6 +22,10 @@ import { ProjectColorPicker } from "./components/ProjectColorPicker";
 import { QuickSwitcher } from "./components/QuickSwitcher";
 import { RecentProjects } from "./components/RecentProjects";
 import { TerminalsView } from "./components/TerminalsView";
+import { TimerModal } from "./components/TimerModal";
+import { TimerRail, dispatchOpenTimer } from "./components/TimerRail";
+import { playFinishBell } from "./lib/timer-effects";
+import { createTimerStore } from "./lib/timer-store";
 import {
   currentWindowLabel,
   cycleBucket,
@@ -61,6 +65,11 @@ export const App: Component = () => {
   const [bucketsKey, setBucketsKey] = createSignal(0);
   const [panelsHidden, setPanelsHidden] = createSignal(false);
   const [zoom, setZoom] = createSignal(1.1);
+
+  // Project-keyed focus countdown — same store the BucketWorkspace uses, but
+  // a per-window instance so each project window's timer ticks independently
+  // of the workspace's. The modal listens on window for TIMER_OPEN_EVENT.
+  const timerStore = createTimerStore();
 
   const isBucketWorkspace = () => bucketWorkspaceId() !== null;
 
@@ -160,6 +169,7 @@ export const App: Component = () => {
   let unlistenZoomReset: UnlistenFn | undefined;
   let unlistenZoomBroadcast: UnlistenFn | undefined;
   let unlistenOpenFolder: UnlistenFn | undefined;
+  let unsubTimerFinish: (() => void) | undefined;
 
   onMount(async () => {
     let label = "main";
@@ -251,6 +261,14 @@ export const App: Component = () => {
       if (next === zoom()) return;
       setZoom(next);
     });
+
+    // Subtle finish cue for the title-bar focus timer. The rail itself runs
+    // an is-finished throb animation, so a single bell is enough — no flash
+    // overlay here (we have only one project per window; no need to disambiguate
+    // which ring finished like the 3D workspace does).
+    unsubTimerFinish = timerStore.onFinish(() => {
+      playFinishBell();
+    });
   });
 
   // Apply this window's color theme whenever currentProject changes. Zoom is
@@ -291,6 +309,7 @@ export const App: Component = () => {
     unlistenZoomReset?.();
     unlistenZoomBroadcast?.();
     unlistenOpenFolder?.();
+    unsubTimerFinish?.();
     if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
     if (isMain()) {
       void setMainProject(null);
@@ -316,6 +335,16 @@ export const App: Component = () => {
         <span class="title-bar-text">
           Lexical Emerson{projectName() ? ` — ${projectName()}` : ""}
         </span>
+        <Show when={currentProject()}>
+          {(proj) => (
+            <TimerRail
+              project={proj}
+              store={timerStore}
+              accent={terminalAccent}
+              onOpen={() => dispatchOpenTimer(proj().path)}
+            />
+          )}
+        </Show>
         <Show when={currentProject()}>
           <button
             type="button"
@@ -474,6 +503,13 @@ export const App: Component = () => {
           is null and Cmd+Shift+N silently does nothing. */}
       <Show when={currentProject()}>
         {(proj) => <NotesModal projectId={proj().id} />}
+      </Show>
+      <Show when={currentProject()}>
+        <TimerModal
+          project={currentProject}
+          store={timerStore}
+          accent={terminalAccent}
+        />
       </Show>
     </div>
     </Show>

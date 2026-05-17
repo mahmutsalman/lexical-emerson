@@ -105,6 +105,104 @@
   transition: opacity 180ms ease;
 }
 
+/* --- Title-bar variant (normal per-project window) --------------------- */
+/* Compact horizontal pill that lives in the .title-bar, just before the
+   notes icon. Same component as the 3D rail, just smaller and laid out for
+   the title strip. Shown whenever a project is loaded — independent of the
+   panels-hidden toggle, since the title bar spans the full window in both
+   states. */
+.title-bar .timer-rail {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 6px;
+
+  /* Tighter than the 3D rail so it doesn't crowd the title text. The pill
+     uses a strong dark background so it reads as a self-contained surface
+     against any project-tinted title bar (otherwise the rail blends into
+     a same-coloured title bar — e.g. green numbers on a green title bar). */
+  height: 18px;
+  padding: 0 8px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  /* The right-edge accent stripe uses the project's LIGHT palette variant
+     (--proj-border, set by applyPalette() on <html>) so it stands off the
+     same-colour title bar. Falls back to the dark accent (--timer-accent
+     set inline on the rail) for non-title-bar contexts, then to translucent
+     white for the no-colour project case. */
+  border-right: 2px solid
+    var(--proj-border, var(--timer-accent, rgba(255, 255, 255, 0.45)));
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: none;
+  /* Override the 3D rule's transition list with a simpler one. */
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.title-bar .timer-rail:hover {
+  background: rgba(0, 0, 0, 0.62);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+.title-bar .timer-rail-label {
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.title-bar .timer-rail-time {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* The "click to set" hint is too noisy at this size — drop it. The button
+   itself has a title attribute for hover discoverability. */
+.title-bar .timer-rail-hint {
+  display: none;
+}
+
+/* Running countdown: use the project's LIGHT palette variant so the digits
+   keep the colour identity (green project → green-family digits) but stay
+   readable against the title bar's DARK accent base. No-colour projects
+   fall back to crisp white. */
+.title-bar .timer-rail.is-running .timer-rail-time {
+  color: var(--proj-border, #ffffff);
+}
+
+.title-bar .timer-rail.is-paused .timer-rail-time {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Finished state — same intent as the 3D rail (gold + subtle throb) but the
+   throb shadow is scaled down to fit the title bar. The base .is-finished
+   animation rule from the 3D scope reads `box-shadow: 0 4px 12px ...` which
+   is fine here; we just override the keyframe via a tighter shadow at peak.
+   Easier: rebind the animation to a title-bar-local keyframe. */
+.title-bar .timer-rail.is-finished {
+  border-right-color: #fbbf24;
+  animation: title-bar-timer-throb 1.2s ease-in-out infinite;
+}
+
+.title-bar .timer-rail.is-finished .timer-rail-time {
+  color: #fbbf24;
+}
+
+@keyframes title-bar-timer-throb {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+  50% { box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.28); }
+}
+
 /* --- Modal -------------------------------------------------------------- */
 
 .timer-overlay {
