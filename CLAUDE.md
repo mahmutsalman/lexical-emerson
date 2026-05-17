@@ -39,7 +39,7 @@ These are decided and should NOT be casually reconsidered:
 - **PTY reader thread MUST be killed by closing the master fd from another thread.** `portable-pty`'s blocking `read()` doesn't observe signals. See `src-tauri/src/pty.rs` and ADR-0001's gotchas.
 - **xterm.js WebGL renderer requires `allow-unsigned-executable-memory` entitlement.** Without this, terminal renders black on hardened runtime. See `src-tauri/entitlements.plist`.
 - **SQLite WAL mode from day one.** Set `PRAGMA journal_mode=WAL` on connect. Zero cost now, prevents painful migration later. See ADR-0003.
-- **No embedded code editor in v0.1.** The terminal is the editor. Adding Monaco/CodeMirror is the surest way to balloon to VS Code's RAM profile.
+- **CodeMirror 6 split-pane editor.** Reverses the original "no embedded editor" invariant — see ADR-0013 for the cost analysis. The terminal is still the primary editor (Claude Code does big edits); CodeMirror is for quick by-hand changes between prompts. **Monaco is still off the table** — it costs 50–100 MB per window and most of its value (IntelliSense) needs an LSP layer we don't have.
 
 ## Code style
 

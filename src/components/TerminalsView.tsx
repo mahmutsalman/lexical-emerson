@@ -14,9 +14,11 @@ import { emit } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
+import { EditorPane } from "./EditorPane";
 import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
 import { TranscriptModal } from "./TranscriptModal";
+import type { EditorState } from "../lib/editor-state";
 import {
   bytesToBase64,
   detectClaudeSessionsForCwd,
@@ -66,6 +68,10 @@ export interface TerminalsViewProps {
   projectId: number;
   zoom?: Accessor<number>;
   accent?: Accessor<string | null>;
+  // Per-window editor store. When state.activeId() is non-null, an editor
+  // pane fills the terminal stack and terminal hosts hide. Editor tabs
+  // render after terminal tabs in the unified strip.
+  editorState?: EditorState;
 }
 
 export const TerminalsView: Component<TerminalsViewProps> = (props) => {
@@ -129,6 +135,16 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
 
   const activeId = () => activeByProject()[props.projectPath] ?? "";
 
+  // True when an editor file is the "what's visible" choice for this
+  // window. Used everywhere we need to flip between terminal view and
+  // editor view: which tab is "active" styling, which host renders,
+  // whether 3D toggle does anything.
+  const showsEditor = () => (props.editorState?.activeId() ?? null) !== null;
+  const editorFiles = () => props.editorState?.files() ?? [];
+  const editorActiveId = () => props.editorState?.activeId() ?? null;
+  const dirtyForEditor = (id: string) =>
+    props.editorState?.dirty()[id] ?? false;
+
   // 3D arc layout. Standard CSS-3D carousel math, adapted so the active
   // terminal sits at ~70% size in the centre and the immediate neighbours
   // peek in from the margins. Geometry:
@@ -142,8 +158,15 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   //   translateZ(-D) on top of -R is THE key — without it, the active face
   //   ends up at z = +R, often past the perspective distance, and the whole
   //   scene either clips or implodes.
+  // Editor view never enters the 3D cylinder — the user picked "editor
+  // stays flat" when 3D + editor coexist. So is3d is false whenever an
+  // editor file is the visible thing, regardless of the stored per-project
+  // toggle. ⌘⌥3 itself is also a no-op while editor is showing (see the
+  // menu listener below).
   const is3d = () =>
-    (is3dByProject()[props.projectPath] ?? false) && projectTabs().length >= 2;
+    !showsEditor() &&
+    (is3dByProject()[props.projectPath] ?? false) &&
+    projectTabs().length >= 2;
   // 45° per slot keeps adjacent neighbours readable while still letting up to
   // 5 terminals fit in front of the viewer (180° arc). For N ≥ 6 the slots
   // pack tighter to stay inside that 180° front-arc.
@@ -428,6 +451,15 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     setActiveForCurrent(arr[next].id);
   };
 
+  const cycleEditor = (delta: number) => {
+    const arr = editorFiles();
+    if (arr.length < 2) return;
+    const idx = arr.findIndex((f) => f.id === editorActiveId());
+    if (idx === -1) return;
+    const next = (idx + delta + arr.length) % arr.length;
+    props.editorState?.setActive(arr[next].id);
+  };
+
   // Whenever the project changes (or on first mount), ensure this project
   // has at least one terminal and a valid active id. Suspended while the
   // restore lookup is in flight so we don't spawn an empty terminal that
@@ -448,8 +480,10 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   // accelerators (⌘K, ⌘⌥3, ⌘⌥←/→) capture the keystroke and seem to
   // restore focus AFTER our microtask runs, parking it back on the previous
   // active. The setTimeout backup re-focuses on a later turn, beating the
-  // OS focus restoration.
+  // OS focus restoration. Skipped when an editor file is the visible thing
+  // — would steal focus from CodeMirror's textarea otherwise.
   const focusActive = () => {
+    if (showsEditor()) return;
     const id = activeId();
     if (!id) return;
     queueMicrotask(() => handles.get(id)?.focus());
@@ -457,6 +491,9 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   };
   createEffect(() => {
     activeId();
+    // Also track showsEditor so flipping FROM editor view BACK to a
+    // terminal restores xterm focus, even if activeId didn't change.
+    showsEditor();
     focusActive();
   });
   // Same belt-and-suspenders on 3D toggle — the accelerator that triggered
@@ -545,16 +582,48 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     });
 
     const unlistens: UnlistenFn[] = await Promise.all([
-      onMenuEvent("terminal-new", () => addTerminal()),
+      onMenuEvent("terminal-new", () => {
+        // ⌘T should always create + show a terminal, even when the user
+        // is currently looking at an editor file. Otherwise pressing ⌘T
+        // from the editor view feels broken — nothing visibly happens.
+        props.editorState?.setActive(null);
+        addTerminal();
+      }),
       onMenuEvent("terminal-close", () => {
+        // ⌘W routes here. When an editor is the visible thing, close THAT
+        // tab instead of a hidden terminal. Otherwise ⌘W on the editor
+        // view would close a terminal you can't even see.
+        if (showsEditor()) {
+          const id = editorActiveId();
+          if (id) props.editorState?.close(id);
+          return;
+        }
         const id = activeId();
         if (id) closeTerminal(id);
       }),
-      onMenuEvent("terminal-next", () => cycleTerminal(1)),
-      onMenuEvent("terminal-prev", () => cycleTerminal(-1)),
+      onMenuEvent("terminal-next", () => {
+        // Cycle within whichever kind is currently visible. Cycling across
+        // kinds would mix two different lists and trip muscle memory.
+        if (showsEditor()) {
+          cycleEditor(1);
+          return;
+        }
+        cycleTerminal(1);
+      }),
+      onMenuEvent("terminal-prev", () => {
+        if (showsEditor()) {
+          cycleEditor(-1);
+          return;
+        }
+        cycleTerminal(-1);
+      }),
       onMenuEvent("terminal-toggle-3d", () => {
         // No-op with fewer than 2 terminals — nothing to fan out.
         if (projectTabs().length < 2) return;
+        // No-op while an editor file is the visible thing. The user picked
+        // "editor stays flat, 3D applies to terminals only" — so toggling
+        // 3D from inside the editor view would have nothing to show.
+        if (showsEditor()) return;
         setIs3dByProject((prev) => ({
           ...prev,
           [props.projectPath]: !prev[props.projectPath],
@@ -655,14 +724,15 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
           {(tab, idx) => (
             <button
               type="button"
-              class={`terminal-tab ${tab.id === activeId() ? "active" : ""} ${
-                suspendedByTab()[tab.id] ? "suspended" : ""
-              }`}
+              class={`terminal-tab ${
+                tab.id === activeId() && !showsEditor() ? "active" : ""
+              } ${suspendedByTab()[tab.id] ? "suspended" : ""}`}
               onClick={() => {
+                // Clicking a terminal tab always switches AWAY from the
+                // editor view. Without this, the styling would mark the
+                // tab as inactive even though it owns the visible pane.
+                props.editorState?.setActive(null);
                 setActiveForCurrent(tab.id);
-                // Click on a suspended tab's title also wakes it — saves a
-                // second click through the placeholder for the common case
-                // of "I'm focusing this tab to use it again."
                 if (suspendedByTab()[tab.id]) resumeTab(tab.id);
               }}
               title={suspendedByTab()[tab.id] ? `${tab.cwd} — suspended (click to resume)` : tab.cwd}
@@ -689,11 +759,50 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
         <button
           type="button"
           class="terminal-tab-add"
-          onClick={() => addTerminal()}
+          onClick={() => {
+            props.editorState?.setActive(null);
+            addTerminal();
+          }}
           title="New terminal (⌘T)"
         >
           +
         </button>
+        {/* Editor file tabs share the same strip as terminals. Visually
+            distinct (smaller, italic when dirty) so the eye can still
+            separate "shells" from "files" at a glance. Click selects;
+            × closes. Created via FileTree double-click — there's no
+            "new editor" button. */}
+        <For each={editorFiles()}>
+          {(file) => (
+            <button
+              type="button"
+              class={`terminal-tab editor-tab ${
+                showsEditor() && file.id === editorActiveId() ? "active" : ""
+              } ${dirtyForEditor(file.id) ? "dirty" : ""}`}
+              onClick={() => props.editorState?.setActive(file.id)}
+              title={file.path}
+            >
+              <span class="tab-label">
+                <Show when={dirtyForEditor(file.id)}>
+                  <span class="editor-tab-dirty" aria-label="unsaved">
+                    •
+                  </span>{" "}
+                </Show>
+                {basename(file.path)}
+              </span>
+              <span
+                class="tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.editorState?.close(file.id);
+                }}
+                title="Close file (changes will be lost)"
+              >
+                ×
+              </span>
+            </button>
+          )}
+        </For>
       </div>
       <div
         class="terminal-stack"
@@ -742,6 +851,12 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
               const isFacing = () => tab.id === activeId();
               const hostStyle = () => {
                 if (!inThisProject()) return { display: "none" };
+                // Editor view wins over terminal view in 2D mode — the
+                // editor pane fills the same area, so all terminal hosts
+                // hide. 3D mode never coexists with editor view (is3d()
+                // returns false when showsEditor() is true), so the
+                // cylinder branch below stays terminals-only.
+                if (showsEditor()) return { display: "none" };
                 if (!is3d()) {
                   return {
                     display: isFacing() ? "flex" : "none",
@@ -788,6 +903,32 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
                       accent={props.accent}
                     />
                   </Show>
+                </div>
+              );
+            }}
+          </For>
+          {/* Editor panes share the same absolute-positioned host area as
+              terminals. Always mounted (so a tab's CodeMirror state +
+              dirty buffer survives switching back to a terminal), but
+              only one is visible at a time — the active editor when
+              showsEditor() is true. */}
+          <For each={editorFiles()}>
+            {(file) => {
+              const isActive = () =>
+                showsEditor() && file.id === editorActiveId();
+              return (
+                <div
+                  class="terminal-host editor-host-shell"
+                  style={{ display: isActive() ? "flex" : "none" }}
+                >
+                  <EditorPane
+                    path={file.path}
+                    isActive={isActive}
+                    onReady={(h) => props.editorState?.setHandle(file.id, h)}
+                    onDirtyChange={(d) =>
+                      props.editorState?.setDirty(file.id, d)
+                    }
+                  />
                 </div>
               );
             }}

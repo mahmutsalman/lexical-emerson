@@ -65,6 +65,12 @@ export interface PtyTerminalInfo {
   title: string | null;
 }
 
+export interface TextFile {
+  path: string;
+  content: string;
+  bytes: number;
+}
+
 // --- D2 transcript reader --------------------------------------------------
 
 // Tail-scan result for the SuspendedPlaceholder preview card. Rust reads

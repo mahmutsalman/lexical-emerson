@@ -43,6 +43,7 @@ import {
   getGlobalZoom,
   setGlobalZoom,
 } from "./lib/ipc";
+import { createEditorState } from "./lib/editor-state";
 import { applyPalette, isColorTag, PALETTE } from "./lib/palette";
 import type { Bucket, Project } from "./lib/types";
 
@@ -65,6 +66,12 @@ export const App: Component = () => {
   const [bucketsKey, setBucketsKey] = createSignal(0);
   const [panelsHidden, setPanelsHidden] = createSignal(false);
   const [zoom, setZoom] = createSignal(1.1);
+  // Per-window editor store. Owns open files, dirty state, and the active
+  // editor id. TerminalsView consumes it to render editor tabs alongside
+  // its own terminal tabs in a single unified strip — same content area,
+  // same tab bar. FileTree.onOpenFile calls editorState.open(path) which
+  // either focuses the existing tab or creates a new one.
+  const editorState = createEditorState();
 
   // Project-keyed focus countdown — same store the BucketWorkspace uses, but
   // a per-window instance so each project window's timer ticks independently
@@ -169,6 +176,7 @@ export const App: Component = () => {
   let unlistenZoomReset: UnlistenFn | undefined;
   let unlistenZoomBroadcast: UnlistenFn | undefined;
   let unlistenOpenFolder: UnlistenFn | undefined;
+  let unlistenFileSave: UnlistenFn | undefined;
   let unsubTimerFinish: (() => void) | undefined;
 
   onMount(async () => {
@@ -237,6 +245,14 @@ export const App: Component = () => {
 
     unlistenOpenFolder = await onMenuEvent("file-open-folder", () => {
       openFolderInNewWindow();
+    });
+
+    // ⌘S → save the active editor tab. Per-window scope: the menu event
+    // is already routed to the focused window only (see main.rs), so each
+    // window's listener saves its own editor's active tab. Silent no-op
+    // when no tab is active (e.g. only terminals are open).
+    unlistenFileSave = await onMenuEvent("file-save", () => {
+      void editorState.saveActive();
     });
 
     const bumpZoom = (delta: number) => {
@@ -309,6 +325,7 @@ export const App: Component = () => {
     unlistenZoomReset?.();
     unlistenZoomBroadcast?.();
     unlistenOpenFolder?.();
+    unlistenFileSave?.();
     unsubTimerFinish?.();
     if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
     if (isMain()) {
@@ -476,7 +493,10 @@ export const App: Component = () => {
         {(proj) => (
           <div class="workspace">
             <div class="file-tree-panel">
-              <FileTree rootPath={proj().path} />
+              <FileTree
+                rootPath={proj().path}
+                onOpenFile={(path) => editorState.open(path)}
+              />
             </div>
             <div class="terminal-panel">
               <TerminalsView
@@ -485,6 +505,7 @@ export const App: Component = () => {
                 projectId={proj().id}
                 zoom={zoom}
                 accent={terminalAccent}
+                editorState={editorState}
               />
             </div>
           </div>

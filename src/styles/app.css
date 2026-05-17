@@ -591,9 +591,18 @@
 }
 
 .bucket-cycle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 2px 8px;
   border-radius: 3px;
   color: #9a9aa3;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.bucket-cycle-btn--prev {
+  transform: scaleX(-1);
 }
 
 .bucket-cycle-btn:hover:not(:disabled) {
@@ -604,6 +613,34 @@
 .bucket-cycle-btn:disabled {
   color: #3a3a42;
   cursor: not-allowed;
+}
+
+/* "Armed" state — user clicked the footer in any project window, so ← / →
+   are now wired to cycle the active bucket's projects. The .is-armed class
+   is set by a Tauri broadcast (`bucket-bar://armed-changed`) so EVERY
+   bucket-member project window lights up together — that way the user can
+   keep using arrow keys uninterrupted after ⌘J cycles to the next window.
+   Layout is preserved (no border-width change) by painting the accent
+   stripe with an inset box-shadow. */
+.bucket-bar.is-armed {
+  outline: 0;
+  background: #14141a;
+  box-shadow: inset 0 2px 0 var(--proj-accent, #4f88ff);
+  cursor: default;
+}
+
+.bucket-bar.is-armed:focus,
+.bucket-bar.is-armed:focus-within {
+  outline: 0;
+}
+
+.bucket-bar.is-armed .bucket-cycle-btn:not(:disabled) {
+  color: var(--proj-accent, #4f88ff);
+}
+
+.bucket-bar.is-armed .bucket-bar-position {
+  color: var(--proj-accent, #4f88ff);
+  font-weight: 600;
 }
 
 /* --- Buckets sidebar list ------------------------------------------------ */
@@ -1139,4 +1176,70 @@
   font-family: "SF Mono", Menlo, monospace;
   font-size: 10px;
   margin-right: 4px;
+}
+
+/* --- editor (CodeMirror 6) -------------------------------------------- */
+/* Editor tabs share .terminal-tab styling (same strip, same look) but get
+   a top-stripe in the project accent so the eye can tell shells from
+   files at a glance. Italic label while dirty; • prefix is reinforcement. */
+.terminal-tab.editor-tab {
+  box-shadow: inset 0 2px 0 var(--proj-accent, #4a4a52);
+  color: #b8b8c0;
+}
+
+.terminal-tab.editor-tab.dirty .tab-label {
+  font-style: italic;
+}
+
+.editor-tab-dirty {
+  color: var(--proj-accent, #6aa8ff);
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Editor host occupies the same absolute-positioned slot inside
+   .terminal-stack as a terminal host does. Force `position: absolute`
+   and `inset: 0` are already on .terminal-host; we just override the
+   inline display via JS to flip visibility. */
+.editor-host-shell {
+  background: #0e0e10;
+}
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.editor-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* CodeMirror's own scrollbars handle internal overflow. The .cm-editor
+   needs to fill the host or the editor area renders at 0 height when
+   there's no content. */
+.editor-host .cm-editor {
+  height: 100%;
+}
+
+.editor-host .cm-scroller {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.editor-loading,
+.editor-error {
+  padding: 16px;
+  color: #7a7a85;
+  font-size: 12px;
+  font-family: "Inter", -apple-system, sans-serif;
+}
+
+.editor-error {
+  color: #ff9a9a;
 }

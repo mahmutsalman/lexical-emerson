@@ -12,6 +12,7 @@ import type {
   PtyDataEvent,
   PtyExitEvent,
   PtyTerminalInfo,
+  TextFile,
   TranscriptPeek,
   TranscriptResponse,
 } from "./types";
@@ -25,6 +26,19 @@ export async function listDirectory(
   showHidden = false,
 ): Promise<DirEntry[]> {
   return await invoke<DirEntry[]>("list_directory", { path, showHidden });
+}
+
+// --- file editor -----------------------------------------------------------
+
+export async function readTextFile(path: string): Promise<TextFile> {
+  return await invoke<TextFile>("read_text_file", { path });
+}
+
+export async function writeTextFile(
+  path: string,
+  content: string,
+): Promise<number> {
+  return await invoke<number>("write_text_file", { path, content });
 }
 
 export async function openTerminal(
@@ -436,6 +450,7 @@ export type MenuEventId =
   | "zoom-out"
   | "zoom-reset"
   | "file-open-folder"
+  | "file-save"
   | "bucket-3d-ring-prev"
   | "bucket-3d-ring-next";
 

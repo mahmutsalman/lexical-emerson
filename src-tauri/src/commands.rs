@@ -20,6 +20,75 @@ pub struct DirEntry {
     pub is_symlink: bool,
 }
 
+#[derive(Serialize)]
+pub struct TextFile {
+    pub path: String,
+    pub content: String,
+    pub bytes: u64,
+}
+
+// Largest file we'll load into the editor. CodeMirror handles big files but a
+// 5 MB cap protects the renderer from someone double-clicking a multi-GB log;
+// the user gets a clear error instead of a frozen WKWebView.
+const MAX_TEXT_FILE_BYTES: u64 = 5 * 1024 * 1024;
+
+// Cheap binary heuristic — a NUL byte in the first sniff window almost always
+// indicates non-text. Catches PNG, jpg, sqlite DBs, executables, etc. without
+// pulling in a full MIME detector.
+fn looks_binary(sample: &[u8]) -> bool {
+    sample.contains(&0u8)
+}
+
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<TextFile, String> {
+    let metadata = std::fs::metadata(&path).map_err(|e| format!("stat({path}): {e}"))?;
+    if !metadata.is_file() {
+        return Err(format!("not a regular file: {path}"));
+    }
+    let size = metadata.len();
+    if size > MAX_TEXT_FILE_BYTES {
+        return Err(format!(
+            "file too large ({} bytes, max {})",
+            size, MAX_TEXT_FILE_BYTES
+        ));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("read({path}): {e}"))?;
+    let sniff = &bytes[..bytes.len().min(8192)];
+    if looks_binary(sniff) {
+        return Err("binary file (contains NUL)".to_string());
+    }
+    let content = String::from_utf8(bytes).map_err(|_| "file is not valid UTF-8".to_string())?;
+    Ok(TextFile {
+        path,
+        content,
+        bytes: size,
+    })
+}
+
+// Atomic-ish write: stage to a sibling temp, then rename. Rename within the
+// same dir is atomic on macOS, so a crash mid-save leaves either the old or
+// the new content — never a truncated half-written file.
+#[tauri::command]
+pub fn write_text_file(path: String, content: String) -> Result<u64, String> {
+    let path_buf = std::path::PathBuf::from(&path);
+    let parent = path_buf
+        .parent()
+        .ok_or_else(|| format!("no parent dir: {path}"))?;
+    let filename = path_buf
+        .file_name()
+        .ok_or_else(|| format!("no filename: {path}"))?
+        .to_string_lossy()
+        .into_owned();
+    let tmp = parent.join(format!(".{filename}.lex-tmp"));
+    std::fs::write(&tmp, content.as_bytes())
+        .map_err(|e| format!("write({}): {e}", tmp.display()))?;
+    if let Err(e) = std::fs::rename(&tmp, &path_buf) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("rename({path}): {e}"));
+    }
+    Ok(content.len() as u64)
+}
+
 #[tauri::command]
 pub async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();

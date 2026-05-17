@@ -52,6 +52,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::pick_folder,
             commands::list_directory,
+            commands::read_text_file,
+            commands::write_text_file,
             commands::open_terminal,
             commands::write_terminal,
             commands::resize_terminal,
@@ -157,6 +159,7 @@ fn main() {
             }
             let event_name = match event.id().as_ref() {
                 "file_open_folder" => "menu://file-open-folder",
+                "file_save" => "menu://file-save",
                 "terminal_new" => "menu://terminal-new",
                 "terminal_close" => "menu://terminal-close",
                 "terminal_next" => "menu://terminal-next",
@@ -327,9 +330,16 @@ fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     let file_open_folder = MenuItemBuilder::with_id("file_open_folder", "Open Folder…")
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
+    // ⌘S routes to menu://file-save. Handled by the EditorTabs in the
+    // focused window; when no editor tab is open it's a silent no-op.
+    let file_save = MenuItemBuilder::with_id("file_save", "Save")
+        .accelerator("CmdOrCtrl+S")
+        .build(app)?;
 
     let file_submenu = SubmenuBuilder::new(app, "File")
         .item(&file_open_folder)
+        .separator()
+        .item(&file_save)
         .separator()
         .close_window()
         .build()?;

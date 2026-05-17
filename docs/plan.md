@@ -11,11 +11,15 @@ Not an IDE in the Monaco/LSP sense. The terminal is the editor (because Claude C
 
 ## Non-goals (v0.1)
 
-- No embedded code editor (no Monaco, no CodeMirror).
-- No LSP, no syntax intelligence beyond what the terminal renders.
+- No LSP, no syntax intelligence beyond syntax highlighting + bracket/indent.
 - No git UI panel — use the terminal.
 - No Windows/Linux builds — macOS-only for v0.1.
 - No language servers of any kind. This is the whole point.
+
+> Note: "No embedded code editor" was previously listed here. Reversed
+> 2026-05-17 in favor of a CodeMirror 6 split pane (NOT Monaco). See
+> ADR-0013 for the cost analysis. The terminal is still the primary
+> editor; CodeMirror is for quick by-hand edits between Claude prompts.
 
 ## Success metric
 
@@ -75,6 +79,7 @@ See `docs/ADRs/` for the load-bearing choices:
 - ADR-0008 — Release process for v0.1 (ad-hoc-signed, no notarization)
 - ADR-0009 — Quill.js for the project notes editor
 - ADR-0010 — Bucket Workspace + Tauri v2 ACL window-scoping gotcha
+- ADR-0013 — CodeMirror 6 editor in a split pane (reverses the "no embedded editor" non-goal)
 
 ## Predicted gotchas (mitigations baked into M1)
 

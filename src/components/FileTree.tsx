@@ -13,6 +13,7 @@ import type { DirEntry } from "../lib/types";
 interface NodeProps {
   entry: DirEntry;
   depth: number;
+  onOpenFile?: (path: string) => void;
 }
 
 const TreeNode: Component<NodeProps> = (props) => {
@@ -22,8 +23,22 @@ const TreeNode: Component<NodeProps> = (props) => {
     (path) => listDirectory(path, false),
   );
 
-  const toggle = () => {
-    if (props.entry.is_dir) setExpanded((v) => !v);
+  // Single-click on a directory toggles expansion; single-click on a file
+  // opens it in the editor. Matches Sublime / Finder behavior. Double-click
+  // is also handled so users with that muscle memory still hit the same
+  // open path (no-op on a directory).
+  const onClick = () => {
+    if (props.entry.is_dir) {
+      setExpanded((v) => !v);
+      return;
+    }
+    if (props.entry.is_symlink) return;
+    props.onOpenFile?.(props.entry.path);
+  };
+
+  const onDoubleClick = () => {
+    if (props.entry.is_dir || props.entry.is_symlink) return;
+    props.onOpenFile?.(props.entry.path);
   };
 
   const icon = () => {
@@ -36,7 +51,8 @@ const TreeNode: Component<NodeProps> = (props) => {
     <>
       <div
         class={`tree-node ${props.entry.is_dir ? "directory" : "file"}`}
-        onClick={toggle}
+        onClick={onClick}
+        onDblClick={onDoubleClick}
         style={{ "padding-left": `${8 + props.depth * 12}px` }}
         title={props.entry.path}
       >
@@ -50,7 +66,13 @@ const TreeNode: Component<NodeProps> = (props) => {
           </div>
         }>
           <For each={children() ?? []}>
-            {(child) => <TreeNode entry={child} depth={props.depth + 1} />}
+            {(child) => (
+              <TreeNode
+                entry={child}
+                depth={props.depth + 1}
+                onOpenFile={props.onOpenFile}
+              />
+            )}
           </For>
         </Suspense>
       </Show>
@@ -60,6 +82,7 @@ const TreeNode: Component<NodeProps> = (props) => {
 
 export interface FileTreeProps {
   rootPath: string;
+  onOpenFile?: (path: string) => void;
 }
 
 export const FileTree: Component<FileTreeProps> = (props) => {
@@ -74,7 +97,9 @@ export const FileTree: Component<FileTreeProps> = (props) => {
         each={rootEntries() ?? []}
         fallback={<div class="empty-state">empty folder</div>}
       >
-        {(entry) => <TreeNode entry={entry} depth={0} />}
+        {(entry) => (
+          <TreeNode entry={entry} depth={0} onOpenFile={props.onOpenFile} />
+        )}
       </For>
     </Suspense>
   );
