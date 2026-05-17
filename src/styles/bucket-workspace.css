@@ -587,15 +587,15 @@
   transform-style: preserve-3d;
   transition: transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
   will-change: transform;
-  /* Inset the entire rings stack ~28px from the top and bottom of
-     .bw-stack so the active terminal's first and last lines have
-     visible breathing room. Without this the active pane sits flush
-     against (a) the workspace's title-bar — pushing the shell prompt
-     into the first pixels of the terminal — and (b) the window's
-     bottom edge. The auto-hidden header that slides down on hover
-     still overlays the top ~40px when visible, but it lands on the
-     buffer rather than on text. */
-  top: 28px;
+  /* Inset the entire rings stack from the top and bottom of .bw-stack
+     so the active terminal's frame border has breathing room. Top
+     inset is larger because the facing pane's accent-coloured outline
+     was being clipped against the workspace's title-bar / auto-hidden
+     header strip; user reported "I cannot see the top frame". The
+     auto-hidden header that slides down on hover still overlays this
+     band when visible, but it lands on the buffer / margin rather
+     than on text. */
+  top: 48px;
   bottom: 28px;
 }
 

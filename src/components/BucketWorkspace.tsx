@@ -811,15 +811,19 @@ export const BucketWorkspace: Component<BucketWorkspaceProps> = (props) => {
   // in viewport coordinates, regardless of which ring index we're on.
   const stackTranslateY = () =>
     -activeProjectIdx() * ringHeightPx();
-  // Subtle tilt per ring step gives the camera a physical "leaning" feel
-  // when arrowing between projects. Clamped at ±6° so the active ring
-  // stays readable head-on.
-  const stackTiltDeg = () => {
-    const n = projects().length;
-    if (n < 2) return 0;
-    const mid = (n - 1) / 2;
-    return Math.max(-6, Math.min(6, (activeProjectIdx() - mid) * 1.5));
-  };
+  // Constant cylindric tilt — small fixed rotateX so the cylinder reads
+  // as a 3D enclosing shape (side panes' tops lean toward the camera,
+  // wrapping around the facing pane) rather than a flat fan. Was
+  // previously a per-idx formula clamped to ±6°, which made each
+  // project's active cylinder look subtly different (-3.75° at idx 0,
+  // +6° at idx 6 with 7 projects). User wants every project's 3D view
+  // to look IDENTICAL while keeping the cylindric wrap, so the value
+  // is now a constant -4° regardless of which ring is active. Sign:
+  // negative rotateX tilts the top toward the viewer (view from
+  // slightly above) — combined with the dome translateY lift, this
+  // gives side panes the enclosing "wrapped up-and-around" feel the
+  // user described. Tunable from this single number.
+  const stackTiltDeg = () => -4;
   // Notes face occupies slot 0 of each ring's cylinder; terminal i sits at
   // slot i+1. Total slot count = arr.length + 1.
   const ringRotationDeg = (projectPath: string) => {
