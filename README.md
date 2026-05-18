@@ -4,6 +4,8 @@ A lightweight macOS folder + terminal launcher for developers who use Claude Cod
 
 **Not an IDE.** No Monaco, no LSP, no language servers. Just a folder, a file tree, and a real PTY-backed terminal — plus the one feature you've been missing: **cycle through a curated bucket of 3–5 active projects with one keystroke.**
 
+![Lexical Emerson — main window showing PTY terminal, bucket navigation, and focus timer](.github/assets/screenshot.png)
+
 ## Why
 
 VS Code costs ~500 MB of RAM per window. If you juggle 20 projects a week, that's a 10 GB ceiling before language servers even open a file. Lexical Emerson targets **~70–80 MB per window — a ~5–10× win** — by deliberately not being an editor. Your editor is `claude` running inside the terminal.
