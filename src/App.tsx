@@ -45,6 +45,7 @@ import {
 } from "./lib/ipc";
 import { createEditorState } from "./lib/editor-state";
 import { applyPalette, isColorTag, PALETTE } from "./lib/palette";
+import { setupGlobalShiftArm } from "./lib/shift-arm";
 import type { Bucket, Project } from "./lib/types";
 
 const ZOOM_MIN = 0.75;
@@ -85,6 +86,8 @@ export const App: Component = () => {
   // resolves the row still gets written. Zoom is a single global value
   // (app_meta.global_zoom), so any project window's bump broadcasts to all
   // other open windows via the Rust-side `zoom://changed` event.
+  const cleanupShiftArm = setupGlobalShiftArm();
+
   let zoomPersistTimer: number | undefined;
   const schedulePersistZoom = (z: number) => {
     if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
@@ -318,6 +321,7 @@ export const App: Component = () => {
   });
 
   onCleanup(() => {
+    cleanupShiftArm();
     unlistenFocus?.();
     unlistenBuckets?.();
     unlistenBucketNext?.();

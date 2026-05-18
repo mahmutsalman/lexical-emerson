@@ -593,10 +593,6 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   let tabsStripEl!: HTMLDivElement;
 
   const armTabs = () => {
-    // No point arming with 0 or 1 navigable items — the user wouldn't see
-    // anything happen and the visual cue would just be noise.
-    const total = projectTabs().length + editorFiles().length;
-    if (total < 2) return;
     setTabsArmed(true);
     setLastArmedBar("header");
   };
