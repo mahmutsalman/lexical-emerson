@@ -28,9 +28,10 @@ CREATE TABLE IF NOT EXISTS buckets (
 );
 
 CREATE TABLE IF NOT EXISTS bucket_projects (
-    bucket_id  INTEGER NOT NULL REFERENCES buckets(id) ON DELETE CASCADE,
-    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    position   INTEGER NOT NULL,
+    bucket_id   INTEGER NOT NULL REFERENCES buckets(id) ON DELETE CASCADE,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    is_frequent INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (bucket_id, project_id)
 );
 CREATE INDEX IF NOT EXISTS idx_bucket_projects_order
@@ -79,6 +80,7 @@ pub struct Project {
     pub last_active_at: Option<String>,
     pub color: Option<String>,
     pub zoom: f64,
+    pub is_frequent: bool,
 }
 
 pub struct Store {
@@ -101,6 +103,7 @@ impl Store {
         migrate_notes_columns(&conn)?;
         migrate_projects_columns(&conn)?;
         migrate_buckets_columns(&conn)?;
+        migrate_bucket_projects_columns(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -547,6 +550,24 @@ impl Store {
         Ok(())
     }
 
+    // Flip the per-(bucket, project) "frequent" star. Returns the new state.
+    pub fn toggle_project_frequent(&self, bucket_id: i64, project_id: i64) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        let current: i64 = conn.query_row(
+            "SELECT is_frequent FROM bucket_projects
+              WHERE bucket_id = ?1 AND project_id = ?2",
+            params![bucket_id, project_id],
+            |row| row.get(0),
+        )?;
+        let next = if current == 0 { 1i64 } else { 0i64 };
+        conn.execute(
+            "UPDATE bucket_projects SET is_frequent = ?1
+              WHERE bucket_id = ?2 AND project_id = ?3",
+            params![next, bucket_id, project_id],
+        )?;
+        Ok(next != 0)
+    }
+
     // True when at least one bucket containing `project_id` has the toggle on.
     // The persistence and restore paths both consult this — once the gate
     // closes, neither save nor restore happens for that project.
@@ -828,6 +849,21 @@ fn migrate_buckets_columns(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_bucket_projects_columns(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(bucket_projects)")?;
+    let column_names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !column_names.iter().any(|n| n == "is_frequent") {
+        conn.execute(
+            "ALTER TABLE bucket_projects ADD COLUMN is_frequent INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
     Ok(Note {
         id: row.get(0)?,
@@ -927,13 +963,25 @@ fn load_bucket_projects(
     bucket_id: i64,
 ) -> Result<Vec<Project>> {
     let mut stmt = conn.prepare(
-        "SELECT p.id, p.path, p.name, p.last_focused_at, p.last_active_at, p.color, p.zoom
+        "SELECT p.id, p.path, p.name, p.last_focused_at, p.last_active_at, p.color, p.zoom,
+                bp.is_frequent
            FROM bucket_projects bp
            JOIN projects p ON p.id = bp.project_id
           WHERE bp.bucket_id = ?1
           ORDER BY bp.position ASC",
     )?;
-    let rows = stmt.query_map(params![bucket_id], project_from_row)?;
+    let rows = stmt.query_map(params![bucket_id], |row| {
+        Ok(Project {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            name: row.get(2)?,
+            last_focused_at: row.get(3)?,
+            last_active_at: row.get(4)?,
+            color: row.get(5)?,
+            zoom: row.get(6)?,
+            is_frequent: row.get::<_, i64>(7)? != 0,
+        })
+    })?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
@@ -960,5 +1008,6 @@ fn project_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         last_active_at: row.get(4)?,
         color: row.get(5)?,
         zoom: row.get(6)?,
+        is_frequent: false,
     })
 }

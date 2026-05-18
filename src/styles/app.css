@@ -614,6 +614,13 @@
   font-weight: 500;
 }
 
+.bucket-bar-star {
+  margin-left: 6px;
+  color: var(--star-color, #d4a942);
+  font-size: 12px;
+  line-height: 1;
+}
+
 .bucket-bar-trailing {
   margin-left: auto;
   color: #5e5e66;
@@ -881,6 +888,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bucket-project-star {
+  color: var(--star-color, #d4a942);
+  font-size: 11px;
+  line-height: 1;
+  flex: 0 0 auto;
 }
 
 .empty-state {

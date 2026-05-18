@@ -303,6 +303,13 @@ export async function setBucketAutoRestore(
   await invoke("set_bucket_auto_restore", { bucketId, enabled });
 }
 
+export async function toggleProjectFrequent(
+  bucketId: number,
+  projectId: number,
+): Promise<boolean> {
+  return await invoke<boolean>("toggle_project_frequent", { bucketId, projectId });
+}
+
 // One entry per terminal tab the project window has open at close time.
 // `claudeSessionId` is the UUID the frontend bound to the tab via post-spawn
 // jsonl-diff polling — sending it per-tab (instead of letting Rust re-scan

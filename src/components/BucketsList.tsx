@@ -369,6 +369,9 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
                                 <span class="bucket-project-name">
                                   {project.name}
                                 </span>
+                                <Show when={project.is_frequent}>
+                                  <span class="bucket-project-star" title="frequent">★</span>
+                                </Show>
                                 <button
                                   type="button"
                                   class="bucket-action danger"

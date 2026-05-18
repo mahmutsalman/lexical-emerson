@@ -937,6 +937,21 @@ pub fn set_bucket_auto_restore(
     Ok(())
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn toggle_project_frequent(
+    app: AppHandle,
+    state: State<AppState>,
+    bucket_id: i64,
+    project_id: i64,
+) -> Result<bool, String> {
+    let new_state = state
+        .store
+        .toggle_project_frequent(bucket_id, project_id)
+        .map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(new_state)
+}
+
 // Per-tab snapshot the frontend sends at close: the tab's cwd and the
 // Claude session UUID the frontend has bound to that specific tab via its
 // post-spawn polling. Sent as an array preserving tab order. `cwd` is

@@ -23,6 +23,7 @@ export interface Project {
   last_active_at: string | null;
   color: string | null;
   zoom: number;
+  is_frequent: boolean;
 }
 
 export interface Bucket {

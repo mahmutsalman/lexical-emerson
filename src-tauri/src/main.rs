@@ -101,6 +101,7 @@ fn main() {
             commands::spawn_bucket_3d_workspace,
             commands::debug_insert_fake_registry_entry,
             commands::set_bucket_auto_restore,
+            commands::toggle_project_frequent,
             commands::persist_project_terminals,
             commands::list_persisted_terminals,
             commands::delete_persisted_terminals_for_project,
