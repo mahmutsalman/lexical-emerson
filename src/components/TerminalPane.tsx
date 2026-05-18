@@ -17,6 +17,7 @@ import {
   resizeTerminal,
   writeTerminal,
 } from "../lib/ipc";
+import { lastArmedBar } from "../lib/arm-focus";
 
 export interface TerminalHandle {
   focus: () => void;
@@ -94,6 +95,52 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
   let resizeTimer: number | undefined;
   let zoomRefitTimer: number | undefined;
   let disposed = false;
+  // Right-Shift-tap: tap right Shift alone (no other key held, released
+  // within TAP_WINDOW_MS) to return focus to whichever bar was last armed.
+  // Distinguishes a tap from Shift held as a modifier (e.g. typing a capital)
+  // by tainting the sequence if any other keydown fires during the hold.
+  // Gated on this instance's hostEl so multiple TerminalPanes don't double-fire.
+  let shiftDownAt = 0;
+  let shiftTainted = false;
+  const TAP_WINDOW_MS = 300;
+
+  const terminalHasFocus = () => {
+    const active = document.activeElement;
+    return !!active && !!hostEl && hostEl.contains(active);
+  };
+
+  const onShiftKeyDown = (e: KeyboardEvent) => {
+    if (!terminalHasFocus()) return;
+    if (e.code === "ShiftRight") {
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) {
+        shiftDownAt = 0;
+        shiftTainted = true;
+        return;
+      }
+      shiftDownAt = performance.now();
+      shiftTainted = false;
+      return;
+    }
+    if (shiftDownAt !== 0) shiftTainted = true;
+  };
+
+  const onShiftKeyUp = (e: KeyboardEvent) => {
+    if (e.code !== "ShiftRight") return;
+    const downAt = shiftDownAt;
+    const tainted = shiftTainted;
+    shiftDownAt = 0;
+    shiftTainted = false;
+    if (!terminalHasFocus()) return;
+    if (downAt === 0 || tainted) return;
+    if (performance.now() - downAt > TAP_WINDOW_MS) return;
+    e.preventDefault();
+    window.dispatchEvent(
+      new CustomEvent("lexical:arm-switch-vertical", {
+        detail: { target: lastArmedBar() },
+      }),
+    );
+  };
+
   // Capture the "should I kill the PTY on teardown?" decision at mount
   // time. We CANNOT read it from props inside onCleanup: when a Tauri
   // window closes, Solid's props proxy is torn down faster than this
@@ -145,6 +192,9 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
     });
 
     term.open(hostEl);
+
+    window.addEventListener("keydown", onShiftKeyDown, true);
+    window.addEventListener("keyup", onShiftKeyUp, true);
 
     // Always use the Canvas renderer. The WebGL renderer is faster on
     // heavy output, but xterm's WebGL <canvas> gets promoted to its own
@@ -325,6 +375,8 @@ export const TerminalPane: Component<TerminalPaneProps> = (props) => {
 
   onCleanup(() => {
     disposed = true;
+    window.removeEventListener("keydown", onShiftKeyDown, true);
+    window.removeEventListener("keyup", onShiftKeyUp, true);
     if (resizeTimer !== undefined) clearTimeout(resizeTimer);
     if (zoomRefitTimer !== undefined) clearTimeout(zoomRefitTimer);
     resizeObserver?.disconnect();

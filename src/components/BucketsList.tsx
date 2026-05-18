@@ -44,6 +44,7 @@ import {
   setActiveBucket,
   setBucketAutoRestore,
   setBucketCursorToProject,
+  setBucketIdleSuspendMin,
   spawnBucket3DWorkspace,
 } from "../lib/ipc";
 import type { Bucket, Project } from "../lib/types";
@@ -284,6 +285,27 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
                     {bucket.name}
                   </span>
                   <span class="bucket-count">{bucket.projects.length}</span>
+                  <div
+                    class="bucket-idle-toggle"
+                    onClick={(e) => e.stopPropagation()}
+                    title="Auto-suspend idle terminals after…"
+                  >
+                    <For each={[15, 30, 60] as const}>
+                      {(opt) => (
+                        <button
+                          type="button"
+                          class="bucket-idle-btn"
+                          classList={{ "is-active": bucket.idle_suspend_min === opt }}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await setBucketIdleSuspendMin(bucket.id, opt).catch(() => {});
+                          }}
+                        >
+                          {opt}
+                        </button>
+                      )}
+                    </For>
+                  </div>
                   <Show when={props.currentProjectId != null && !isInBucket(bucket)}>
                     <button
                       type="button"

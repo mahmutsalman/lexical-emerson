@@ -136,6 +136,10 @@ export async function setGlobalZoom(zoom: number): Promise<number> {
   return await invoke<number>("set_global_zoom", { zoom });
 }
 
+export async function setBucketIdleSuspendMin(id: number, min: number): Promise<void> {
+  await invoke("set_bucket_idle_suspend_min", { id, min });
+}
+
 export async function hideProject(id: number): Promise<void> {
   await invoke("hide_project", { id });
 }

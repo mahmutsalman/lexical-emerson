@@ -538,6 +538,22 @@ pub fn get_active_bucket(state: State<AppState>) -> Result<Option<i64>, String> 
     state.store.get_active_bucket().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn set_bucket_idle_suspend_min(
+    app: AppHandle,
+    state: State<AppState>,
+    id: i64,
+    min: i64,
+) -> Result<(), String> {
+    let clamped = min.clamp(1, 1440);
+    state
+        .store
+        .set_bucket_idle_suspend_min(id, clamped)
+        .map_err(|e| e.to_string())?;
+    emit_buckets_changed(&app);
+    Ok(())
+}
+
 // Cycle the active bucket: advance its cursor, focus or spawn the resulting
 // project's window. Returns the project that was activated, or None if there
 // is no active bucket / the bucket is empty.

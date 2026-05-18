@@ -19,6 +19,7 @@ import { ProjectNotesPanel } from "./ProjectNotesPanel";
 import { TerminalPane, type TerminalHandle } from "./TerminalPane";
 import { TranscriptModal } from "./TranscriptModal";
 import type { EditorState } from "../lib/editor-state";
+import { setLastArmedBar } from "../lib/arm-focus";
 import {
   bytesToBase64,
   detectClaudeSessionsForCwd,
@@ -72,6 +73,10 @@ export interface TerminalsViewProps {
   // pane fills the terminal stack and terminal hosts hide. Editor tabs
   // render after terminal tabs in the unified strip.
   editorState?: EditorState;
+  // Idle timeout in minutes from the active bucket. Falls back to the
+  // module-level AUTO_SUSPEND_MIN constant when not provided (e.g. 3D
+  // workspace, tests).
+  idleSuspendMin?: Accessor<number>;
 }
 
 export const TerminalsView: Component<TerminalsViewProps> = (props) => {
@@ -351,7 +356,7 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       const lastOut = lastOutputAtByTab()[tab.id] ?? baseline;
       const lastTouch = Math.max(lastIn, lastOut);
       const idleMin = (now - lastTouch) / 60_000;
-      if (idleMin < AUTO_SUSPEND_MIN) continue;
+      if (idleMin < (props.idleSuspendMin?.() ?? AUTO_SUSPEND_MIN)) continue;
       if (now - lastOut < MID_RESPONSE_THRESHOLD_MS) continue;
       void suspendTab(tab.id);
     }
@@ -593,6 +598,7 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     const total = projectTabs().length + editorFiles().length;
     if (total < 2) return;
     setTabsArmed(true);
+    setLastArmedBar("header");
   };
 
   const disarmTabs = () => {
@@ -611,6 +617,11 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
       cycleAll(1);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      disarmTabs();
+      // The createEffect watching tabsArmed calls focusActive() on the flip to
+      // false — terminal gets focus without an explicit focusActive() call here.
     } else if (e.key === "ArrowDown") {
       // Vertical arm-switch: hand off to the bucket bar so ← / → now cycle
       // projects without the user lifting their hand off the keyboard. The
@@ -958,6 +969,15 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     };
     window.addEventListener("lexical:arm-switch-vertical", onArmSwitch);
 
+    // When the footer (BucketBar) arms and the user presses Enter, it
+    // dispatches this event to ask the active window's TerminalsView to take
+    // focus — BucketBar has no direct reference to our handles Map.
+    const onFocusTerminal = () => {
+      if (tabsArmed()) disarmTabs();
+      focusActive();
+    };
+    window.addEventListener("lexical:focus-terminal", onFocusTerminal);
+
     // D1 — start the idle-check loop. window.setInterval returns a number
     // ID; cleared in onCleanup. The tick is cheap (a single signal read +
     // arithmetic per tab, then async suspendTab for each candidate), so
@@ -973,6 +993,7 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       stackEl.removeEventListener("wheel", onWheel);
       document.removeEventListener("click", onDocClickForTabs, true);
       window.removeEventListener("lexical:arm-switch-vertical", onArmSwitch);
+      window.removeEventListener("lexical:focus-terminal", onFocusTerminal);
       clearInterval(idleInterval);
     });
   });

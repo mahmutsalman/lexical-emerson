@@ -71,6 +71,7 @@ fn main() {
             commands::set_project_zoom,
             commands::get_global_zoom,
             commands::set_global_zoom,
+            commands::set_bucket_idle_suspend_min,
             commands::hide_project,
             commands::reveal_in_finder,
             commands::list_buckets,

@@ -202,13 +202,16 @@
 }
 
 /* "Armed" state — user clicked the strip background, so ← / → are now
-   wired to cycle through the unified [terminals, editors] list. Stripe
-   above the strip thickens to the project accent so the user has an
-   unambiguous visual confirmation. Layout preserved (no border-width
-   change) by repainting the existing inset-shadow stripe in accent. */
+   wired to cycle through the unified [terminals, editors] list. The top
+   stripe (same as baseline) keeps the project-identity cue stable; a
+   matching bottom stripe appears only when armed so the user has an
+   unambiguous visual cue at the inner edge of the strip — same trick
+   the footer uses. Layout preserved (no border-width change). */
 .terminal-tabs.is-armed {
   background: #14141a;
-  box-shadow: inset 0 2px 0 var(--proj-accent, #4f88ff);
+  box-shadow:
+    inset 0 2px 0 var(--proj-accent, #4f88ff),
+    inset 0 -2px 0 var(--proj-accent, #4f88ff);
   cursor: default;
 }
 
@@ -780,6 +783,41 @@
 .bucket-action.danger:hover {
   background: #5a2229;
   color: #ffffff;
+}
+
+.bucket-idle-toggle {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: #1a1a20;
+  border: 1px solid #2a2a2f;
+  border-radius: 4px;
+  padding: 1px;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+.bucket-idle-btn {
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #4a4a52;
+  font-size: 9px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 4px;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: background 80ms, color 80ms;
+}
+
+.bucket-idle-btn:hover {
+  color: #c8c8d0;
+}
+
+.bucket-idle-btn.is-active {
+  background: var(--proj-accent, #2d5cc8);
+  color: #fff;
 }
 
 .bucket-projects {

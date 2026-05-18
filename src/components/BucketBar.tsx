@@ -11,6 +11,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { cycleBucket } from "../lib/ipc";
 import type { Bucket } from "../lib/types";
+import { setLastArmedBar } from "../lib/arm-focus";
 
 export interface BucketBarProps {
   activeBucket: Bucket | null;
@@ -47,6 +48,7 @@ export const BucketBar: Component<BucketBarProps> = (props) => {
   const arm = () => {
     if (!props.activeBucket) return;
     broadcastArmed(true);
+    setLastArmedBar("footer");
   };
 
   const onKey = (e: KeyboardEvent) => {
@@ -70,6 +72,10 @@ export const BucketBar: Component<BucketBarProps> = (props) => {
         }),
       );
       broadcastArmed(false);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      broadcastArmed(false);
+      window.dispatchEvent(new CustomEvent("lexical:focus-terminal"));
     } else if (e.key === "Escape") {
       e.preventDefault();
       broadcastArmed(false);

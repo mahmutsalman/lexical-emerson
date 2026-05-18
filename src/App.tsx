@@ -121,6 +121,8 @@ export const App: Component = () => {
     return list.find((b) => b.id === id) ?? null;
   });
 
+  const idleSuspendMin = createMemo(() => activeBucket()?.idle_suspend_min ?? 60);
+
   const mutateCurrentProject = async (path: string) => {
     try {
       const proj = await openProject(path);
@@ -506,6 +508,7 @@ export const App: Component = () => {
                 zoom={zoom}
                 accent={terminalAccent}
                 editorState={editorState}
+                idleSuspendMin={idleSuspendMin}
               />
             </div>
           </div>

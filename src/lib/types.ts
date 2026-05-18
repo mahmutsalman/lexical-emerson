@@ -31,6 +31,7 @@ export interface Bucket {
   cursor: number;
   projects: Project[];
   auto_restore_sessions: boolean;
+  idle_suspend_min: number;
 }
 
 export interface PersistedTerminal {

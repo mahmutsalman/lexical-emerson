@@ -231,7 +231,7 @@ impl Store {
     pub fn list_buckets(&self) -> Result<Vec<Bucket>> {
         let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cursor, auto_restore_sessions
+            "SELECT id, name, cursor, auto_restore_sessions, idle_suspend_min
                FROM buckets
               ORDER BY created_at ASC, id ASC",
         )?;
@@ -241,11 +241,12 @@ impl Store {
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
             ))
         })?;
         let mut out = Vec::new();
         for r in rows {
-            let (id, name, cursor, auto_restore) = r?;
+            let (id, name, cursor, auto_restore, idle_min) = r?;
             let projects = load_bucket_projects(&conn, id)?;
             out.push(Bucket {
                 id,
@@ -253,6 +254,7 @@ impl Store {
                 cursor,
                 projects,
                 auto_restore_sessions: auto_restore != 0,
+                idle_suspend_min: idle_min,
             });
         }
         Ok(out)
@@ -261,7 +263,7 @@ impl Store {
     pub fn get_bucket(&self, id: i64) -> Result<Option<Bucket>> {
         let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
         match conn.query_row(
-            "SELECT id, name, cursor, auto_restore_sessions FROM buckets WHERE id = ?1",
+            "SELECT id, name, cursor, auto_restore_sessions, idle_suspend_min FROM buckets WHERE id = ?1",
             params![id],
             |row| {
                 Ok((
@@ -269,10 +271,11 @@ impl Store {
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
                 ))
             },
         ) {
-            Ok((id, name, cursor, auto_restore)) => {
+            Ok((id, name, cursor, auto_restore, idle_min)) => {
                 let projects = load_bucket_projects(&conn, id)?;
                 Ok(Some(Bucket {
                     id,
@@ -280,11 +283,21 @@ impl Store {
                     cursor,
                     projects,
                     auto_restore_sessions: auto_restore != 0,
+                    idle_suspend_min: idle_min,
                 }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
+    }
+
+    pub fn set_bucket_idle_suspend_min(&self, id: i64, min: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("store poisoned"))?;
+        conn.execute(
+            "UPDATE buckets SET idle_suspend_min = ?1 WHERE id = ?2",
+            params![min, id],
+        )?;
+        Ok(())
     }
 
     pub fn create_bucket(&self, name: &str) -> Result<Bucket> {
@@ -297,6 +310,7 @@ impl Store {
             cursor: 0,
             projects: Vec::new(),
             auto_restore_sessions: false,
+            idle_suspend_min: 60,
         })
     }
 
@@ -805,6 +819,12 @@ fn migrate_buckets_columns(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    if !column_names.iter().any(|n| n == "idle_suspend_min") {
+        conn.execute(
+            "ALTER TABLE buckets ADD COLUMN idle_suspend_min INTEGER NOT NULL DEFAULT 60",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -869,6 +889,7 @@ pub struct Bucket {
     pub cursor: i64,
     pub projects: Vec<Project>,
     pub auto_restore_sessions: bool,
+    pub idle_suspend_min: i64,
 }
 
 #[derive(Serialize, Clone)]

@@ -1,29 +1,29 @@
 # Status — Lexical Emerson
 
-**Last updated**: 2026-05-18 07:15
-**Current phase**: v0.1 shipped + post-v0.1 feature work (M6 notes, M7 workspace, M7.5 session restore, M8 RAM optimization, D1/D2 suspend-resume)
-**Current slice**: D1/D2 polish — armed keyboard navigation layer complete (bucket bar + tab strip + vertical switching)
+**Last updated**: 2026-05-18 (session 3)
+**Current phase**: v0.1 shipped + post-v0.1 feature work (keyboard UX layer, visual polish, per-bucket idle config)
+**Current slice**: D1/D2 polish — keyboard enter/escape flow + armed-header visual cue + per-bucket idle timeout
 
 ---
 
 ## Last Completed Task
-Shipped commit `e703bdf` — armed tab strip with vertical arrow-key switching between header and footer. Click the terminal/editor tab strip to arm it; ← / → cycle through the unified terminals + editors list; ↓ hands arm off to the bucket bar footer (← / → now cycles projects); ↑ in the armed footer hands arm back to the header. Fixed ArrowDown focus leak (`e.stopPropagation()` + `verticalSwitching` flag) that was sending cursor-down to the Claude Code terminal input during the header→footer arm handoff.
+Per-bucket idle-suspend timeout: each bucket stores its own `idle_suspend_min` (15 / 30 / 60, default 60). Toggle renders inline in each bucket header row in BucketsList sidebar. Active bucket's timeout governs all open project windows reactively. DB migration via existing `migrate_buckets_columns()` pattern; broadcasts via `buckets://changed`.
 
 ## Next Concrete Action
-User empirically verifies the full keyboard navigation round-trip: click header strip → ← / → cycle terminals/editors → ↓ → bucket bar arms → ← / → cycle projects → ↑ → header re-arms → Esc → focus back in terminal. Also confirm cross-window: ↓ in window A's header arms BOTH windows' footers (broadcastArmed propagates). Watch for any focus issues with the ↑ handoff direction (footer→header) under key-repeat.
+Relaunch app after bundle install, verify: (1) each bucket row shows [15·30·60] with 60 highlighted, (2) toggling updates all windows, (3) persists across restart. Then verify the Enter/right-Shift-tap terminal flow from the same session.
 
 ## Active Blockers
 - none
 
 ## Open Questions
-- Manual `claude` typed >10 s after PTY open won't get a binding → won't persist at close. Acceptable for now (suspend's exclude-list fallback still handles it within a session).
-- Root cause of the "command typed twice" symptom (image 5 from earlier session) is only defensively guarded — if the handlePaneSpawned double-fire warn ever fires post-fix, that's the signal to dig.
-- "Loads twice then stops" / focus-refit confirmations from `954e80f` and `e042f48` still need real-world confirmation across N>2 project windows (carried forward).
+- Manual `claude` typed >10 s after PTY open won't get a binding → won't persist at close. Acceptable for now.
+- Root cause of "command typed twice" symptom only defensively guarded — if double-fire warn fires post-fix, dig deeper.
+- "Loads twice then stops" confirmations across N>2 project windows still needed (carried forward).
 - 1/7 projects intermittently drops Enter/typing in 3D mode (carried forward, low-priority).
-- `@xterm/addon-webgl` still in `package.json` — `npm uninstall` candidate, decorative since ADR-0012.
-- RAM-optimization backlog parked at `~/.claude/plans/image-4-can-you-check-reflective-snowflake.md` — Tier A/B/C remain queued. Biggest win is B1 lazy-mount terminals in BucketWorkspace (~245 MB → ~100 MB).
+- `@xterm/addon-webgl` still in `package.json` — `npm uninstall` candidate.
+- RAM-optimization backlog at `~/.claude/plans/image-4-can-you-check-reflective-snowflake.md` — Tier A/B/C queued. B1 lazy-mount terminals in BucketWorkspace is biggest win (~245 MB → ~100 MB).
 
 ## Recent Decisions (last 3)
-- (2026-05-18, no ADR) — Armed tab strip with vertical switching. `window.dispatchEvent(CustomEvent "lexical:arm-switch-vertical { target: header|footer }")` coordinates the two strips; same-window siblings confirmed via App.tsx tree, no Tauri round-trip needed. ArrowDown focus leak fixed with `verticalSwitching` flag + `e.stopPropagation()`.
-- (2026-05-18, no ADR) — Bind Claude UUID to the tab, not to its cwd. Per-tab `claudeUuidByTab` signal replaces cwd-scan model; `persist_project_terminals` now takes `Vec<PersistTabInput { cwd, claude_session_id }>`.
-- (2026-05-17, no ADR) — Tier D D1 — auto-suspend idle Claude sessions, 20-min idle threshold, idle-time-only trigger model, silent auto-resume on terminal click/keystroke.
+- (2026-05-18, no ADR) — Enter + right-Shift-tap terminal flow. Enter in armed bar focuses terminal (disarms bar, existing createEffect handles focus). Right-Shift tap (300 ms window, not tainted by other keys) returns focus to last-armed bar. `src/lib/arm-focus.ts` tracks last-armed ("footer" default). `lexical:focus-terminal` CustomEvent channels BucketBar → TerminalsView.
+- (2026-05-18, no ADR) — Armed header bottom stripe. `.terminal-tabs.is-armed` gets a second inset box-shadow on the bottom edge (`inset 0 -2px 0 var(--proj-accent, #4f88ff)`), mirroring the footer's top stripe. Baseline top stripe unchanged — bottom stripe is the armed-only signal.
+- (2026-05-18, no ADR) — Per-bucket idle timeout. `idle_suspend_min INTEGER NOT NULL DEFAULT 60` added to `buckets` table. `idleSuspendMin` memo in App.tsx derives from `activeBucket`, passed as prop to TerminalsView. `idleCheckTick` reads it reactively. Toggle in BucketsList dispatches `set_bucket_idle_suspend_min` command which broadcasts `buckets://changed`.
