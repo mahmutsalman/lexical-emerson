@@ -550,6 +550,92 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     props.editorState?.setActive(arr[next].id);
   };
 
+  // Armed cycle — walks the UNIFIED [terminals..., editors...] list in display
+  // order so the user can drift between a terminal session and an open file
+  // with one keystream. Wraps around the combined length. Switch logic mirrors
+  // the per-button onClick handlers exactly: terminal → clear editor + set
+  // active + resume if suspended; editor → setActive(file.id).
+  const cycleAll = (delta: number) => {
+    type Entry = { kind: "terminal" | "editor"; id: string };
+    const flat: Entry[] = [
+      ...projectTabs().map<Entry>((t) => ({ kind: "terminal", id: t.id })),
+      ...editorFiles().map<Entry>((f) => ({ kind: "editor", id: f.id })),
+    ];
+    if (flat.length < 2) return;
+    const currentId = showsEditor() ? editorActiveId() : activeId();
+    let idx = flat.findIndex(
+      (e) => e.id === currentId && (showsEditor() ? e.kind === "editor" : e.kind === "terminal"),
+    );
+    if (idx === -1) idx = 0;
+    const next = flat[(idx + delta + flat.length) % flat.length];
+    if (next.kind === "terminal") {
+      props.editorState?.setActive(null);
+      setActiveForCurrent(next.id);
+      if (suspendedByTab()[next.id]) resumeTab(next.id);
+    } else {
+      props.editorState?.setActive(next.id);
+    }
+  };
+
+  // Tab-strip armed state. Mirrors the bucket-bar pattern (see BucketBar.tsx
+  // and its `bucket-bar://armed-changed` event) but scoped to a single window:
+  // tabs are per-window so there's no cross-window broadcast — clicking the
+  // strip arms just THIS window's strip. While armed, ← / → on the strip
+  // cycle through the unified terminals + editors list; Esc disarms; a click
+  // anywhere outside the strip also disarms. The visual cue is the
+  // `.is-armed` class on `.terminal-tabs` (CSS adds an accent stripe).
+  const [tabsArmed, setTabsArmed] = createSignal(false);
+  let tabsStripEl!: HTMLDivElement;
+
+  const armTabs = () => {
+    // No point arming with 0 or 1 navigable items — the user wouldn't see
+    // anything happen and the visual cue would just be noise.
+    const total = projectTabs().length + editorFiles().length;
+    if (total < 2) return;
+    setTabsArmed(true);
+  };
+
+  const disarmTabs = () => {
+    setTabsArmed(false);
+  };
+
+  // Set during the header→footer arm handoff. Prevents focusActive() from
+  // grabbing xterm focus while ↓ is still held (key repeat would send
+  // cursor-down to Claude Code's input otherwise).
+  let verticalSwitching = false;
+
+  const onTabsKey = (e: KeyboardEvent) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      cycleAll(-1);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      cycleAll(1);
+    } else if (e.key === "ArrowDown") {
+      // Vertical arm-switch: hand off to the bucket bar so ← / → now cycle
+      // projects without the user lifting their hand off the keyboard. The
+      // BucketBar listens for the same event and arms itself if it can
+      // (active bucket present); we disarm unconditionally — if the target
+      // can't arm, the user re-arms with a click. Matches the project's
+      // window-CustomEvent naming style (lexical:timer-open, etc.).
+      e.preventDefault();
+      e.stopPropagation();
+      verticalSwitching = true;
+      queueMicrotask(() => {
+        verticalSwitching = false;
+      });
+      window.dispatchEvent(
+        new CustomEvent("lexical:arm-switch-vertical", {
+          detail: { target: "footer" },
+        }),
+      );
+      disarmTabs();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      disarmTabs();
+    }
+  };
+
   // Whenever the project changes (or on first mount), ensure this project
   // has at least one terminal and a valid active id. Suspended while the
   // restore lookup is in flight so we don't spawn an empty terminal that
@@ -574,6 +660,16 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   // — would steal focus from CodeMirror's textarea otherwise.
   const focusActive = () => {
     if (showsEditor()) return;
+    // While the tab strip is armed, the user is mid-navigation — stealing
+    // focus to xterm would break the arrow-key cycle on the next press.
+    // Disarming (Esc or click outside) calls focusActive again from the
+    // armed-state effect, so the user still lands on the terminal when
+    // they're done navigating.
+    if (tabsArmed()) return;
+    // During the header→footer arm handoff (↓ pressed), suppress xterm focus
+    // until the microtask queue drains. Without this, key-repeat ↓ events
+    // land on the terminal and send cursor-down to Claude Code's input.
+    if (verticalSwitching) return;
     const id = activeId();
     if (!id) return;
     queueMicrotask(() => handles.get(id)?.focus());
@@ -591,6 +687,20 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   createEffect(() => {
     is3d();
     focusActive();
+  });
+
+  // Armed tab strip — apply programmatic focus to the strip on arm so its
+  // onKeyDown catches arrow keys; on disarm, restore focus to whatever was
+  // visible before (terminal or editor) so the user can immediately type
+  // without an extra click. Reactive to tabsArmed only — runs once per flip.
+  createEffect(() => {
+    if (!tabsStripEl) return;
+    if (tabsArmed()) {
+      tabsStripEl.focus({ preventScroll: true });
+    } else {
+      if (document.activeElement === tabsStripEl) tabsStripEl.blur();
+      focusActive();
+    }
   });
 
   // 30s-debounced project-activity ping.
@@ -825,6 +935,29 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     };
     stackEl.addEventListener("wheel", onWheel, { passive: false });
 
+    // Tab-strip arm/disarm — capture-phase click listener so we catch the
+    // click before any descendant `stopPropagation`. If the click landed
+    // outside the strip, disarm. Clicks inside the strip are handled by
+    // the container's onClick (which arms) and individual buttons (which
+    // stopPropagation so they switch tabs without arming).
+    const onDocClickForTabs = (e: MouseEvent) => {
+      if (!tabsArmed()) return;
+      const t = e.target as HTMLElement | null;
+      if (t && tabsStripEl && tabsStripEl.contains(t)) return;
+      disarmTabs();
+    };
+    document.addEventListener("click", onDocClickForTabs, true);
+
+    // Vertical arm-switch receiver — the footer (BucketBar) dispatches this
+    // when the user presses ArrowUp while it's armed. We arm only when the
+    // event names us as the target; armTabs has its own readiness guard
+    // (terminals + editors >= 2), so the call is safe even on an empty
+    // window.
+    const onArmSwitch = (e: Event) => {
+      if ((e as CustomEvent).detail?.target === "header") armTabs();
+    };
+    window.addEventListener("lexical:arm-switch-vertical", onArmSwitch);
+
     // D1 — start the idle-check loop. window.setInterval returns a number
     // ID; cleared in onCleanup. The tick is cheap (a single signal read +
     // arithmetic per tab, then async suspendTab for each candidate), so
@@ -838,13 +971,27 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       unlistens.forEach((u) => u());
       ro.disconnect();
       stackEl.removeEventListener("wheel", onWheel);
+      document.removeEventListener("click", onDocClickForTabs, true);
+      window.removeEventListener("lexical:arm-switch-vertical", onArmSwitch);
       clearInterval(idleInterval);
     });
   });
 
   return (
     <div class={`terminals-view ${is3d() ? "is-3d" : ""}`}>
-      <div class="terminal-tabs">
+      <div
+        class="terminal-tabs"
+        classList={{ "is-armed": tabsArmed() }}
+        ref={tabsStripEl}
+        tabIndex={-1}
+        onClick={armTabs}
+        onKeyDown={onTabsKey}
+        title={
+          projectTabs().length + editorFiles().length >= 2
+            ? "Click to arm — then ← / → cycle terminals and editor files (Esc to release)"
+            : undefined
+        }
+      >
         <For each={projectTabs()}>
           {(tab, idx) => (
             <button
@@ -852,7 +999,11 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
               class={`terminal-tab ${
                 tab.id === activeId() && !showsEditor() ? "active" : ""
               } ${suspendedByTab()[tab.id] ? "suspended" : ""}`}
-              onClick={() => {
+              onClick={(e) => {
+                // Don't bubble to the strip's onClick (= arm). The tab
+                // switch IS the action; arming would steal focus from the
+                // terminal/editor the user is trying to use.
+                e.stopPropagation();
                 // Clicking a terminal tab always switches AWAY from the
                 // editor view. Without this, the styling would mark the
                 // tab as inactive even though it owns the visible pane.
@@ -884,7 +1035,8 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
         <button
           type="button"
           class="terminal-tab-add"
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation();
             props.editorState?.setActive(null);
             addTerminal();
           }}
@@ -904,7 +1056,10 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
               class={`terminal-tab editor-tab ${
                 showsEditor() && file.id === editorActiveId() ? "active" : ""
               } ${dirtyForEditor(file.id) ? "dirty" : ""}`}
-              onClick={() => props.editorState?.setActive(file.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.editorState?.setActive(file.id);
+              }}
               title={file.path}
             >
               <span class="tab-label">

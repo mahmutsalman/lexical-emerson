@@ -198,6 +198,23 @@
      canvas/WebGL surface that would raster-scale and would also desync
      mouse coords vs getBoundingClientRect under a zoomed ancestor). */
   zoom: var(--ui-zoom, 1);
+  outline: 0;
+}
+
+/* "Armed" state — user clicked the strip background, so ← / → are now
+   wired to cycle through the unified [terminals, editors] list. Stripe
+   above the strip thickens to the project accent so the user has an
+   unambiguous visual confirmation. Layout preserved (no border-width
+   change) by repainting the existing inset-shadow stripe in accent. */
+.terminal-tabs.is-armed {
+  background: #14141a;
+  box-shadow: inset 0 2px 0 var(--proj-accent, #4f88ff);
+  cursor: default;
+}
+
+.terminal-tabs.is-armed:focus,
+.terminal-tabs.is-armed:focus-within {
+  outline: 0;
 }
 
 .terminal-tab {

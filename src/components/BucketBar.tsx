@@ -56,6 +56,20 @@ export const BucketBar: Component<BucketBarProps> = (props) => {
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
       cycle(1);
+    } else if (e.key === "ArrowUp") {
+      // Vertical arm-switch: hand off to the tab strip (TerminalsView)
+      // so ← / → now cycle terminals + editor files. The header listens
+      // for the same event and arms itself if it has anything to cycle.
+      // We broadcast our disarm unconditionally so all sibling windows'
+      // footers also light off, matching the existing click-to-disarm
+      // broadcast behavior.
+      e.preventDefault();
+      window.dispatchEvent(
+        new CustomEvent("lexical:arm-switch-vertical", {
+          detail: { target: "header" },
+        }),
+      );
+      broadcastArmed(false);
     } else if (e.key === "Escape") {
       e.preventDefault();
       broadcastArmed(false);
@@ -73,11 +87,21 @@ export const BucketBar: Component<BucketBarProps> = (props) => {
     broadcastArmed(false);
   };
 
+  // Vertical arm-switch receiver — the header (TerminalsView) dispatches
+  // this when the user presses ArrowDown while it's armed. We delegate to
+  // the existing arm() helper which already has the activeBucket guard,
+  // so an empty-bucket window stays unarmed instead of lighting up with
+  // nothing to cycle.
+  const onArmSwitch = (e: Event) => {
+    if ((e as CustomEvent).detail?.target === "footer") arm();
+  };
+
   onMount(async () => {
     unlistenArmed = await listen<boolean>(ARMED_EVENT, (event) => {
       setArmed(!!event.payload);
     });
     document.addEventListener("click", onDocClick, true);
+    window.addEventListener("lexical:arm-switch-vertical", onArmSwitch);
   });
 
   // Apply focus/blur whenever armed flips. Done as a createEffect so that
@@ -97,6 +121,7 @@ export const BucketBar: Component<BucketBarProps> = (props) => {
   onCleanup(() => {
     unlistenArmed?.();
     document.removeEventListener("click", onDocClick, true);
+    window.removeEventListener("lexical:arm-switch-vertical", onArmSwitch);
   });
 
   return (
