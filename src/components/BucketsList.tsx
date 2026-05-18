@@ -311,23 +311,19 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
                   <div
                     class="bucket-idle-toggle"
                     onClick={(e) => e.stopPropagation()}
-                    title="Auto-suspend idle terminals after…"
+                    title="Auto-suspend idle terminals after… (click to cycle)"
                   >
-                    <For each={[15, 30, 60] as const}>
-                      {(opt) => (
-                        <button
-                          type="button"
-                          class="bucket-idle-btn"
-                          classList={{ "is-active": bucket.idle_suspend_min === opt }}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            await setBucketIdleSuspendMin(bucket.id, opt).catch(() => {});
-                          }}
-                        >
-                          {opt}
-                        </button>
-                      )}
-                    </For>
+                    <button
+                      type="button"
+                      class="bucket-idle-btn is-active"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const next = nextIdleValue(bucket.idle_suspend_min);
+                        await setBucketIdleSuspendMin(bucket.id, next).catch(() => {});
+                      }}
+                    >
+                      {bucket.idle_suspend_min}m
+                    </button>
                   </div>
                   <Show when={props.currentProjectId != null && !isInBucket(bucket)}>
                     <button
@@ -481,6 +477,18 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
     </div>
   );
 };
+
+// Per-bucket idle-suspend timeout values, cycled by the small button in
+// the bucket header. The list is fixed; advancing past the last value
+// wraps back to the first. The Rust `set_bucket_idle_suspend_min` command
+// clamps incoming values to [1, 1440], so all members of this list are
+// valid.
+const IDLE_CYCLE = [15, 30, 60, 90, 120, 180, 240] as const;
+
+function nextIdleValue(current: number): number {
+  const idx = (IDLE_CYCLE as readonly number[]).indexOf(current);
+  return idx === -1 ? IDLE_CYCLE[0] : IDLE_CYCLE[(idx + 1) % IDLE_CYCLE.length];
+}
 
 function computeMenuX(x: number, w: number): number {
   if (x + w + 8 > window.innerWidth) return Math.max(8, x - w);

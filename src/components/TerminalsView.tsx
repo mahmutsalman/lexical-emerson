@@ -362,6 +362,30 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     }
   };
 
+  // Reset every tab's idle counter whenever props.idleSuspendMin changes.
+  // Without this, lowering the threshold could instantly suspend a tab that
+  // had been idle past the new (smaller) limit; raising it would leave a
+  // partially-expired tab with less than the full new grace window. The
+  // Solid prev-value pattern guarantees we only fire on a real change, not
+  // on first run.
+  createEffect<number | undefined>((prev) => {
+    const current = props.idleSuspendMin?.() ?? AUTO_SUSPEND_MIN;
+    if (prev !== undefined && prev !== current) {
+      const now = Date.now();
+      setLastInputAtByTab((rec) => {
+        const next = { ...rec };
+        for (const t of projectTabs()) next[t.id] = now;
+        return next;
+      });
+      setLastOutputAtByTab((rec) => {
+        const next = { ...rec };
+        for (const t of projectTabs()) next[t.id] = now;
+        return next;
+      });
+    }
+    return current;
+  }, undefined);
+
   // Called by TerminalPane once a fresh PTY spawns. Records the session id
   // in a sidecar signal (NOT in the Tab object — see comment on
   // sessionIdByTab above) and registers it with the global terminal
