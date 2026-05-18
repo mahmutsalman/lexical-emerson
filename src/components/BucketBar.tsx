@@ -79,6 +79,10 @@ export const BucketBar: Component<BucketBarProps> = (props) => {
     } else if (e.key === "Escape") {
       e.preventDefault();
       broadcastArmed(false);
+    } else if (e.key === "m" || e.key === "M") {
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent("lexical:toggle-panels"));
+      // Stay armed — footer remains live for chained M-presses or cycling.
     }
   };
 

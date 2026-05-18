@@ -10,7 +10,7 @@ import {
 } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { BucketBar } from "./components/BucketBar";
@@ -182,6 +182,8 @@ export const App: Component = () => {
   let unlistenZoomBroadcast: UnlistenFn | undefined;
   let unlistenOpenFolder: UnlistenFn | undefined;
   let unlistenFileSave: UnlistenFn | undefined;
+  let unlistenPanelsChanged: UnlistenFn | undefined;
+  let onTogglePanels: (() => void) | undefined;
   let unsubTimerFinish: (() => void) | undefined;
 
   onMount(async () => {
@@ -290,6 +292,23 @@ export const App: Component = () => {
     unsubTimerFinish = timerStore.onFinish(() => {
       playFinishBell();
     });
+
+    // Armed-footer M-key: toggle panels for this window and broadcast the
+    // new state so every other project window flips in sync.
+    onTogglePanels = () => {
+      const next = !panelsHidden();
+      setPanelsHidden(next);
+      void emit("panels://changed", next);
+    };
+    window.addEventListener("lexical:toggle-panels", onTogglePanels);
+
+    // Receiver — skip non-project windows; short-circuit when state already
+    // matches (handles the self-echo from the emit above).
+    unlistenPanelsChanged = await listen<boolean>("panels://changed", (event) => {
+      if (!windowLabel().startsWith("project-")) return;
+      if (panelsHidden() === event.payload) return;
+      setPanelsHidden(event.payload);
+    });
   });
 
   // Apply this window's color theme whenever currentProject changes. Zoom is
@@ -332,6 +351,8 @@ export const App: Component = () => {
     unlistenZoomBroadcast?.();
     unlistenOpenFolder?.();
     unlistenFileSave?.();
+    if (onTogglePanels) window.removeEventListener("lexical:toggle-panels", onTogglePanels);
+    unlistenPanelsChanged?.();
     unsubTimerFinish?.();
     if (zoomPersistTimer !== undefined) clearTimeout(zoomPersistTimer);
     if (isMain()) {

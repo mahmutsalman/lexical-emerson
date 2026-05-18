@@ -239,10 +239,19 @@
 }
 
 .terminal-tab.active {
-  background: #0e0e10;
+  background: var(--proj-accent, #2d5cc8);
   color: #ffffff;
-  border-bottom: 1px solid #0e0e10;
+  border-bottom: 1px solid var(--proj-accent, #2d5cc8);
   margin-bottom: -1px;
+}
+
+.terminal-tab.active .tab-close {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.terminal-tab.active .tab-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
 }
 
 .tab-label {
@@ -1250,6 +1259,10 @@
   color: var(--proj-accent, #6aa8ff);
   font-size: 14px;
   line-height: 1;
+}
+
+.terminal-tab.active .editor-tab-dirty {
+  color: #ffffff;
 }
 
 /* Editor host occupies the same absolute-positioned slot inside
