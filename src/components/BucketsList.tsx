@@ -68,6 +68,10 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
   const [menu, setMenu] = createSignal<BucketMenuState | null>(null);
   const closeMenu = () => setMenu(null);
 
+  let menuRef: HTMLDivElement | undefined;
+  const [menuSize, setMenuSize] = createSignal({ w: 240, h: 200 });
+  const [menuMeasured, setMenuMeasured] = createSignal(false);
+
   let newInputEl: HTMLInputElement | undefined;
 
   const openMenu = (e: MouseEvent, b: Bucket) => {
@@ -94,6 +98,25 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", onScroll, true);
     });
+  });
+
+  // Measure the menu div after it mounts so we can flip it above the cursor
+  // when it would otherwise overflow the bottom of the viewport.
+  createEffect(() => {
+    if (menu()) {
+      setMenuMeasured(false);
+      queueMicrotask(() => {
+        if (menuRef) {
+          const { width, height } = menuRef.getBoundingClientRect();
+          if (width > 0 && height > 0) {
+            setMenuSize({ w: width, h: height });
+          }
+        }
+        setMenuMeasured(true);
+      });
+    } else {
+      setMenuMeasured(false);
+    }
   });
 
   const handleOpenWorkspace = async (b: Bucket) => {
@@ -410,10 +433,12 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
         {(m) => (
           <Portal>
             <div
+              ref={menuRef}
               class="context-menu"
               style={{
-                left: `${clampMenuX(m().x)}px`,
-                top: `${clampMenuY(m().y)}px`,
+                left: `${computeMenuX(m().x, menuSize().w)}px`,
+                top: `${computeMenuY(m().y, menuSize().h)}px`,
+                visibility: menuMeasured() ? "visible" : "hidden",
               }}
               onMouseDown={(e) => e.stopPropagation()}
               role="menu"
@@ -457,15 +482,23 @@ export const BucketsList: Component<BucketsListProps> = (props) => {
   );
 };
 
-const MENU_W = 240;
-const MENU_H = 160;
-
-function clampMenuX(x: number): number {
-  const max = window.innerWidth - MENU_W - 8;
-  return Math.min(Math.max(x, 8), Math.max(8, max));
+function computeMenuX(x: number, w: number): number {
+  if (x + w + 8 > window.innerWidth) return Math.max(8, x - w);
+  return Math.max(8, x);
 }
 
-function clampMenuY(y: number): number {
-  const max = window.innerHeight - MENU_H - 8;
-  return Math.min(Math.max(y, 8), Math.max(8, max));
+// Flip the menu above the cursor when (a) it would overflow the bottom or
+// (b) the cursor is in the lower half of the viewport. The second trigger
+// is the load-bearing one — the menu's actual height (~100 px for three
+// short items) often fits below the cursor even in a short sidebar window,
+// so a pure overflow check leaves the menu clipped because measurement
+// reports a height smaller than what the user perceives as "off-screen".
+// Biasing toward flipping in the bottom half matches macOS native context
+// menus and keeps "Load active Claude sessions" reachable.
+function computeMenuY(y: number, h: number): number {
+  const vh = window.innerHeight;
+  if (y + h + 8 > vh || y > vh * 0.55) {
+    return Math.max(8, y - h);
+  }
+  return Math.max(8, y);
 }

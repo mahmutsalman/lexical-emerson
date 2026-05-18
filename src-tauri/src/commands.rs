@@ -994,11 +994,12 @@ pub fn persist_project_terminals(
         .map_err(|e| e.to_string())?;
     eprintln!("[persist] gate={}", gate);
     if !gate {
-        state
-            .store
-            .delete_persisted_terminals_for_project(project_id)
-            .map_err(|e| e.to_string())?;
-        eprintln!("[persist] gate closed: cleared rows, returning");
+        // Gate is off: skip the write, but leave any existing snapshot rows
+        // intact. The gate controls auto-restore on cycle (read side), not
+        // whether the snapshot is preserved. Deleting here would cause the
+        // "Load active Claude sessions" right-click action to fall through to
+        // the FS scan and resurrect terminals the user already closed.
+        eprintln!("[persist] gate closed: skipping write, snapshot preserved");
         return Ok(());
     }
 
@@ -1144,20 +1145,21 @@ pub fn read_session_transcript(
 }
 
 // Right-click → "Load active Claude sessions" action on a bucket row.
-// Source of truth is the filesystem state of `~/.claude/projects/`, NOT
-// the persisted_terminals snapshot — that lets us pick up sessions that
-// never went through a graceful persist (app force-killed, ditto install
-// over a running process, etc.). For every project in this bucket:
+// Strategy: snapshot-first, filesystem fallback.
 //
-//   1. Scan its claude project dir for .jsonl files within the active
-//      mtime window (currently 48h).
-//   2. If any found, overwrite that project's persisted_terminals rows
-//      with one row per .jsonl (newest first).
-//   3. Spawn / focus the project window. Its TerminalsView reads the
-//      rows we just wrote and injects `claude --resume <uuid>` per tab.
+//   If the project has rows in persisted_terminals (written by the
+//   window-close handler on graceful quit), trust that snapshot — it
+//   reflects exactly which terminals were open at close time. Spawn /
+//   focus the window and let TerminalsView.onMount replay the rows via
+//   list_persisted_terminals.
 //
-// Returns the count of windows opened. Projects with no active sessions
-// in the bucket are skipped silently — they don't get a window.
+//   If no snapshot exists (graceful close never fired — force-kill, ditto
+//   install over a running process, auto-restore gate was off at quit, etc.),
+//   fall back to scanning `~/.claude/projects/` for .jsonl files within
+//   the active mtime window, write one row per .jsonl, then spawn the window.
+//
+// Projects with neither a snapshot nor active .jsonl files are skipped.
+// Returns the count of windows opened.
 #[tauri::command(rename_all = "camelCase")]
 pub fn load_active_claude_sessions_for_bucket(
     app: AppHandle,
@@ -1172,11 +1174,35 @@ pub fn load_active_claude_sessions_for_bucket(
 
     let mut count = 0usize;
     for proj in bucket.projects {
+        // Prefer the close-time snapshot over the filesystem. The snapshot
+        // is written by onCloseRequested and contains only the terminals
+        // that were visibly open when the user quit — not every .jsonl
+        // Claude ever created in the project dir.
+        let snapshot = state
+            .store
+            .list_persisted_terminals_for_project(proj.id)
+            .map_err(|e| e.to_string())?;
+
+        if !snapshot.is_empty() {
+            eprintln!(
+                "[load_active] project_id={} ({}) using snapshot ({} row(s))",
+                proj.id,
+                proj.name,
+                snapshot.len()
+            );
+            spawn_or_focus_project_window(&app, &proj)?;
+            count += 1;
+            continue;
+        }
+
+        // No snapshot (non-graceful exit or gate was off) — fall back to
+        // filesystem scan so force-killed sessions can still be recovered.
         let uuids = session_restore::detect_active_claude_sessions(&proj.path);
         if uuids.is_empty() {
             eprintln!(
-                "[load_active] project_id={} ({}) no active sessions on disk",
-                proj.id, proj.name
+                "[load_active] project_id={} ({}) no snapshot and no active sessions on disk",
+                proj.id,
+                proj.name
             );
             continue;
         }
@@ -1185,7 +1211,7 @@ pub fn load_active_claude_sessions_for_bucket(
             .map(|uuid| (proj.path.clone(), Some(uuid)))
             .collect();
         eprintln!(
-            "[load_active] project_id={} ({}) writing {} row(s) from filesystem",
+            "[load_active] project_id={} ({}) no snapshot; writing {} row(s) from filesystem",
             proj.id,
             proj.name,
             rows.len()

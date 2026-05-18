@@ -446,6 +446,14 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
           if (newUuid) {
             setClaudeUuidByTab((prev) => ({ ...prev, [tabId]: newUuid }));
             console.info("[bind] tab", tabId, "→ uuid", newUuid);
+            // Snapshot the project's tabs now that this one has a UUID.
+            // Without this, a brand-new tab (added in-session via ⌘T)
+            // wouldn't make it into the DB until window close — and the
+            // window-close handler has been observed to fail under ⌘Q.
+            const owningTab = allTabs().find((t) => t.id === tabId);
+            if (owningTab?.projectPath === props.projectPath) {
+              queueMicrotask(persistNow);
+            }
             return;
           }
         } catch (err) {
@@ -464,6 +472,24 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     claudeSessionId
       ? `claude --resume ${claudeSessionId}\n`
       : "claude\n";
+
+  // Snapshot the current project's tabs to SQLite immediately. Mirror of
+  // onCloseRequested's payload (line ~803). Called from closeTerminal and
+  // from the post-spawn UUID-bind branch so the DB tracks live state instead
+  // of relying solely on the window-close handler — which has been observed
+  // not to run reliably under ⌘Q's exit-orchestration path.
+  const persistNow = () => {
+    const suspended = suspendedByTab();
+    const bindings = claudeUuidByTab();
+    const tabsInput = projectTabs().map((t) => ({
+      cwd: t.cwd,
+      claudeSessionId:
+        suspended[t.id]?.claudeSessionId ?? bindings[t.id] ?? null,
+    }));
+    void persistProjectTerminals(props.projectId, tabsInput).catch((err) =>
+      console.warn("[persist-now] failed:", err),
+    );
+  };
 
   const closeTerminal = (id: string) => {
     const tab = allTabs().find((t) => t.id === id);
@@ -511,6 +537,14 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     });
     mountTsByTab.delete(id);
     setAllTabs((prev) => prev.filter((t) => t.id !== id));
+
+    // Snapshot the surviving tabs to SQLite right away. The window-close
+    // handler is unreliable under ⌘Q; persisting here makes the DB track
+    // live state. Microtask defers until Solid's signal propagation has
+    // settled, so projectTabs() reflects the removal.
+    if (tab.projectPath === props.projectPath) {
+      queueMicrotask(persistNow);
+    }
 
     // Re-select within the project the closed tab belonged to.
     if (id === activeByProject()[tab.projectPath]) {
