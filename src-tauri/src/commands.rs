@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use base64::{engine::general_purpose, Engine as _};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, Manager, State, TitleBarStyle, WebviewUrl, WebviewWindowBuilder,
 };
@@ -921,27 +921,41 @@ pub fn set_bucket_auto_restore(
     Ok(())
 }
 
+// Per-tab snapshot the frontend sends at close: the tab's cwd and the
+// Claude session UUID the frontend has bound to that specific tab via its
+// post-spawn polling. Sent as an array preserving tab order. `cwd` is
+// always present; `claude_session_id` is None when the tab never started
+// claude (or the bind hasn't fired yet).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistTabInput {
+    pub cwd: String,
+    pub claude_session_id: Option<String>,
+}
+
 // Snapshot a project's ordered terminal tabs to SQLite. Called from the
 // frontend window's close-requested handler so the in-window tab order is
 // preserved. The gate (`project_has_auto_restore_bucket`) is checked here so
 // the frontend doesn't need to know the bucket→project relationship:
-//   - gate open  → detect Claude session per tab, write Claude-only rows
-//   - gate closed → delete any prior rows for this project (intent: "stop
-//                   saving" implies "don't restore stale state either")
+//   - gate open  → write one row per tab whose bound UUID still points at a
+//                  live .jsonl on disk
+//   - gate closed → delete any prior rows for this project
 //
-// This explicitly does NOT keep any process alive. PTYs are still killed by
-// the existing TerminalPane teardown path; we record only the on-disk
-// Claude session UUIDs so `claude --resume <uuid>` can pick them up on the
-// next launch.
+// Per-tab UUIDs (not per-cwd FS detect) so two tabs in the same cwd persist
+// as two distinct rows pointing at two distinct sessions. The previous
+// "scan the cwd and write every UUID we find" path collapsed two tabs onto
+// the same `--resume <uuid>` whenever the user had multiple claude sessions
+// in the same directory — see the suspend/resume convergence bug.
 #[tauri::command(rename_all = "camelCase")]
 pub fn persist_project_terminals(
     state: State<AppState>,
     project_id: i64,
-    cwds: Vec<String>,
+    tabs: Vec<PersistTabInput>,
 ) -> Result<(), String> {
     eprintln!(
-        "[persist] enter project_id={} cwds={:?}",
-        project_id, cwds
+        "[persist] enter project_id={} tab_count={}",
+        project_id,
+        tabs.len()
     );
     let gate = state
         .store
@@ -957,27 +971,39 @@ pub fn persist_project_terminals(
         return Ok(());
     }
 
-    // Snapshot ALL active Claude sessions per cwd, not one row per tab.
-    // Dedupe the tab cwds first so a project with 3 tabs in the same cwd
-    // doesn't enumerate the dir 3 times. Then for each unique cwd, write
-    // one row per fresh .jsonl in the claude project dir. That way a
-    // project with N active conversations comes back as N tabs on
-    // restore, even if the user only had one terminal tab open at quit.
-    let mut seen_cwds: HashSet<String> = HashSet::new();
+    // Defensive dedupe by (cwd, uuid) — guards against a buggy frontend
+    // sending the same binding twice. Tabs without a UUID binding or with
+    // a UUID whose .jsonl no longer exists are skipped: there's nothing
+    // meaningful to resume on next launch.
+    let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut rows: Vec<(String, Option<String>)> = Vec::new();
-    for cwd in cwds {
-        if !seen_cwds.insert(cwd.clone()) {
+    for tab in tabs {
+        let uuid = match tab.claude_session_id {
+            Some(u) if session_restore::session_file_exists(&tab.cwd, &u) => u,
+            Some(u) => {
+                eprintln!(
+                    "[persist] skipping tab cwd={} uuid={} — session file gone",
+                    tab.cwd, u
+                );
+                continue;
+            }
+            None => {
+                eprintln!(
+                    "[persist] skipping tab cwd={} — no UUID bound",
+                    tab.cwd
+                );
+                continue;
+            }
+        };
+        let key = (tab.cwd.clone(), uuid.clone());
+        if !seen.insert(key) {
+            eprintln!(
+                "[persist] dedup: skipping repeat (cwd={}, uuid={})",
+                tab.cwd, uuid
+            );
             continue;
         }
-        let uuids = session_restore::detect_active_claude_sessions(&cwd);
-        eprintln!(
-            "[persist] cwd={} found {} active session(s)",
-            cwd,
-            uuids.len()
-        );
-        for uuid in uuids {
-            rows.push((cwd.clone(), Some(uuid)));
-        }
+        rows.push((tab.cwd, Some(uuid)));
     }
 
     state

@@ -299,15 +299,25 @@ export async function setBucketAutoRestore(
   await invoke("set_bucket_auto_restore", { bucketId, enabled });
 }
 
-// Snapshot the current ordered list of terminal cwds for `projectId`. Rust
-// detects the Claude session UUID per cwd, applies the bucket-gate, and
-// writes one row per Claude-running tab. No process is kept alive across
-// the call — the PTYs are still torn down by TerminalPane's onCleanup.
+// One entry per terminal tab the project window has open at close time.
+// `claudeSessionId` is the UUID the frontend bound to the tab via post-spawn
+// jsonl-diff polling — sending it per-tab (instead of letting Rust re-scan
+// the cwd) is what lets two same-cwd tabs persist as two distinct sessions
+// instead of collapsing onto whichever .jsonl currently has the newest mtime.
+export interface PersistTabInput {
+  cwd: string;
+  claudeSessionId: string | null;
+}
+
+// Snapshot the current ordered list of terminal tabs for `projectId`. Rust
+// applies the bucket-gate and writes one row per Claude-running tab (tabs
+// without a bound UUID are skipped — see PersistTabInput). No process is
+// kept alive across the call — PTYs are still torn down by TerminalPane.
 export async function persistProjectTerminals(
   projectId: number,
-  cwds: string[],
+  tabs: PersistTabInput[],
 ): Promise<void> {
-  await invoke("persist_project_terminals", { projectId, cwds });
+  await invoke("persist_project_terminals", { projectId, tabs });
 }
 
 export async function listPersistedTerminals(

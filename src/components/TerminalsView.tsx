@@ -106,6 +106,23 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   const [suspendedByTab, setSuspendedByTab] = createSignal<
     Record<string, SuspendedInfo>
   >({});
+  // Per-tab Claude session UUID, bound to the tab (NOT to its cwd). Populated
+  // at three points:
+  //   1. Restore — listPersistedTerminals row's claude_session_id.
+  //   2. Post-spawn — a few seconds after `claude --resume <uuid>` (or a
+  //      manually-typed `claude`) starts, we diff the cwd's .jsonl set
+  //      against a pre-spawn snapshot to find the NEW UUID this PTY's
+  //      claude process created. That UUID is the one this tab "owns".
+  //   3. Suspend — if no binding exists yet (e.g. user typed `claude`
+  //      themselves and the post-spawn poller never ran), fall back to FS
+  //      detect with an exclude-list of UUIDs already bound to other
+  //      same-cwd tabs.
+  // Read at suspend time and at window-close persist so two tabs in the
+  // same cwd persist/suspend with DISTINCT UUIDs instead of converging on
+  // whichever .jsonl currently has the newest mtime.
+  const [claudeUuidByTab, setClaudeUuidByTab] = createSignal<
+    Record<string, string>
+  >({});
   // Per-tab activity timestamps fed by TerminalPane's onInput/onOutput
   // callbacks. Read by the idle-check tick to decide suspend candidates.
   // Default-undefined entries are read as "use mountTsByTab as the baseline."
@@ -247,13 +264,26 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     const tab = allTabs().find((t) => t.id === tabId);
     if (!tab) return;
     if (suspendedByTab()[tabId]) return;
-    let uuid: string | undefined;
-    try {
-      const uuids = await detectClaudeSessionsForCwd(tab.cwd);
-      uuid = uuids[0];
-    } catch (err) {
-      console.warn("[suspend] detect failed:", err);
-      return;
+    // Prefer the binding the post-spawn poller (or the previous restore)
+    // wrote against THIS tab. Falling straight through to FS detect is the
+    // bug that made two same-cwd tabs collapse onto a single UUID.
+    let uuid: string | undefined = claudeUuidByTab()[tabId];
+    if (!uuid) {
+      try {
+        const uuids = await detectClaudeSessionsForCwd(tab.cwd);
+        // Exclude UUIDs already owned by other tabs in this cwd so the
+        // unbound tab can't grab a UUID that's actively in use elsewhere.
+        const otherBound = new Set(
+          allTabs()
+            .filter((t) => t.id !== tabId && t.cwd === tab.cwd)
+            .map((t) => claudeUuidByTab()[t.id])
+            .filter((u): u is string => Boolean(u)),
+        );
+        uuid = uuids.find((u) => !otherBound.has(u));
+      } catch (err) {
+        console.warn("[suspend] detect failed:", err);
+        return;
+      }
     }
     if (!uuid) {
       console.info("[suspend] no Claude session in cwd, skip:", tab.cwd);
@@ -269,9 +299,12 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       delete next[tabId];
       return next;
     });
+    // Cache the resolved binding so subsequent suspend cycles for this
+    // same tab don't re-run the FS-detect fallback.
+    setClaudeUuidByTab((prev) => ({ ...prev, [tabId]: uuid! }));
     setSuspendedByTab((prev) => ({
       ...prev,
-      [tabId]: { claudeSessionId: uuid, cwd: tab.cwd },
+      [tabId]: { claudeSessionId: uuid!, cwd: tab.cwd },
     }));
     console.info("[suspend] tab", tabId, "→ paused", { uuid, cwd: tab.cwd });
   };
@@ -329,6 +362,18 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
   // sessionIdByTab above) and registers it with the global terminal
   // registry so other windows (the Bucket Workspace) can discover it.
   const handlePaneSpawned = (tabId: string, sessionId: string) => {
+    // Defensive guard against double-fire. Symptom of the underlying issue
+    // is the post-spawn write landing twice in the same PTY (seen in the
+    // bug report screenshots). If we ever see this warning, the React-like
+    // mount/unmount path is misbehaving — investigate, don't just silence.
+    const existing = sessionIdByTab()[tabId];
+    if (existing) {
+      console.warn(
+        "[TerminalsView] handlePaneSpawned: tab already bound, ignoring",
+        { tabId, existing, attempted: sessionId },
+      );
+      return;
+    }
     setSessionIdByTab((prev) => ({ ...prev, [tabId]: sessionId }));
     const tab = allTabs().find((t) => t.id === tabId);
     if (!tab) {
@@ -345,6 +390,14 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       .catch((err) =>
         console.warn("[TerminalsView] registerTerminal failed:", err),
       );
+
+    // Snapshot the cwd's current Claude UUIDs BEFORE we inject any
+    // post-spawn command, so the poller below can identify the NEW .jsonl
+    // claude creates as "this tab's UUID". Done here (not lazily inside
+    // the poller) so a slow detectClaudeSessionsForCwd doesn't miss
+    // UUIDs that claude writes within the first second.
+    const cwd = tab.cwd;
+    const beforeUuidsPromise = detectClaudeSessionsForCwd(cwd).catch(() => [] as string[]);
 
     // Restore path: a queued shell command (typically `claude --resume <uuid>`)
     // waits for zsh to print its prompt and is then injected once. Delay is
@@ -364,6 +417,38 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
         );
       }, 250);
     }
+
+    // Bind a fresh UUID to this tab once claude has had time to materialize
+    // its .jsonl. Poll at growing intervals up to ~10 s — claude usually
+    // writes the file within 1–3 s but a cold node startup can push that
+    // out. As soon as we find a UUID present in the cwd but NOT in the
+    // pre-spawn snapshot, bind it and stop polling. If nothing new
+    // appears, the tab simply stays unbound (suspend's FS-detect fallback
+    // handles that case).
+    void (async () => {
+      const beforeSet = new Set(await beforeUuidsPromise);
+      const delaysMs = [1500, 2000, 2500, 4000];
+      for (const delay of delaysMs) {
+        await new Promise((r) => setTimeout(r, delay));
+        // Abort if the tab was closed mid-poll.
+        if (!allTabs().find((t) => t.id === tabId)) return;
+        // Abort if the tab was suspended again mid-poll — a stale bind
+        // would clobber the suspend record.
+        if (suspendedByTab()[tabId]) return;
+        try {
+          const after = await detectClaudeSessionsForCwd(cwd);
+          const newUuid = after.find((u) => !beforeSet.has(u));
+          if (newUuid) {
+            setClaudeUuidByTab((prev) => ({ ...prev, [tabId]: newUuid }));
+            console.info("[bind] tab", tabId, "→ uuid", newUuid);
+            return;
+          }
+        } catch (err) {
+          console.warn("[bind] detect failed:", err);
+        }
+      }
+      console.info("[bind] tab", tabId, "no new UUID after polling");
+    })();
   };
 
   // Build the shell command injected after a restored tab's PTY spawns.
@@ -410,6 +495,11 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       return next;
     });
     setLastOutputAtByTab((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setClaudeUuidByTab((prev) => {
       const next = { ...prev };
       delete next[id];
       return next;
@@ -521,24 +611,50 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
     // any auto-restore bucket the list comes back empty.
     try {
       const list = await listPersistedTerminals(props.projectId);
-      if (list.length > 0) {
-        const newTabs: Tab[] = list.map((entry) => ({
+      // Defensive dedupe by (cwd, uuid) — the persist path is also being
+      // fixed to enforce uniqueness, but stale rows written by older
+      // builds (where two tabs collapsed onto the same UUID) shouldn't
+      // come back as two identical restored tabs.
+      const seen = new Set<string>();
+      const deduped = list.filter((entry) => {
+        const key = `${entry.cwd}|${entry.claude_session_id ?? ""}`;
+        if (seen.has(key)) {
+          console.warn(
+            "[restore] dropping duplicate persisted row",
+            entry,
+          );
+          return false;
+        }
+        seen.add(key);
+        return true;
+      });
+      if (deduped.length > 0) {
+        const newTabs: Tab[] = deduped.map((entry) => ({
           id: newTabId(),
           cwd: entry.cwd,
           projectPath: props.projectPath,
           projectId: props.projectId,
         }));
         const postSpawn: Record<string, string> = {};
+        const uuidBindings: Record<string, string> = {};
         const now = Date.now();
-        for (let i = 0; i < list.length; i++) {
+        for (let i = 0; i < deduped.length; i++) {
           postSpawn[newTabs[i].id] = buildResumeCommand(
-            list[i].claude_session_id,
+            deduped[i].claude_session_id,
           );
+          // Seed the per-tab UUID binding so the first suspend cycle
+          // doesn't fall back to FS detect (which would re-converge on
+          // whichever .jsonl is newest). The post-spawn poller below will
+          // overwrite this with the NEW UUID claude creates on resume.
+          if (deduped[i].claude_session_id) {
+            uuidBindings[newTabs[i].id] = deduped[i].claude_session_id!;
+          }
           // D1 — restored tabs need a mount baseline too so the idle-check
           // doesn't immediately treat them as 20 min old.
           mountTsByTab.set(newTabs[i].id, now);
         }
         setPostSpawnByTab((prev) => ({ ...prev, ...postSpawn }));
+        setClaudeUuidByTab((prev) => ({ ...prev, ...uuidBindings }));
         setAllTabs((prev) => [...prev, ...newTabs]);
         setActiveForCurrent(newTabs[newTabs.length - 1].id);
       }
@@ -562,9 +678,18 @@ export const TerminalsView: Component<TerminalsViewProps> = (props) => {
       const PERSIST_TIMEOUT_MS = 1500;
       console.info("[close] persist starting", { projectId: props.projectId });
       try {
-        const cwds = projectTabs().map((t) => t.cwd);
+        // Send the per-tab UUID binding so two same-cwd tabs persist as
+        // two distinct rows. A suspended tab's UUID lives in
+        // suspendedByTab, not claudeUuidByTab (suspendTab moves it).
+        const suspended = suspendedByTab();
+        const bindings = claudeUuidByTab();
+        const tabsInput = projectTabs().map((t) => ({
+          cwd: t.cwd,
+          claudeSessionId:
+            suspended[t.id]?.claudeSessionId ?? bindings[t.id] ?? null,
+        }));
         await Promise.race([
-          persistProjectTerminals(props.projectId, cwds).then(() =>
+          persistProjectTerminals(props.projectId, tabsInput).then(() =>
             console.info("[close] persist resolved"),
           ),
           new Promise((_, reject) =>
